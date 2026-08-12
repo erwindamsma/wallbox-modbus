@@ -52,9 +52,21 @@ class MeterConfig:
 
 
 @dataclass
+class LimitsConfig:
+    # Must match "maximum current per phase" in the myWallbox app's Load
+    # Management settings -- the ceiling the charger balances against.
+    installation_current_a: float = 35.0
+    # Never let the charger's allowance exceed this. null disables the cap.
+    charger_max_current_a: float | None = 16.0
+
+
+@dataclass
 class FailsafeConfig:
     max_data_age_s: float = 15.0
-    current_a: float = 35.0
+    # Must sit above limits.installation_current_a: reporting exactly the
+    # limit is a fixed point of the charger's control loop and leaves it
+    # sitting wherever it already was, instead of backing off.
+    current_a: float = 50.0
 
 
 @dataclass
@@ -75,6 +87,7 @@ class SourceConfig:
 class Config:
     serial: SerialConfig = field(default_factory=SerialConfig)
     meter: MeterConfig = field(default_factory=MeterConfig)
+    limits: LimitsConfig = field(default_factory=LimitsConfig)
     failsafe: FailsafeConfig = field(default_factory=FailsafeConfig)
     source: SourceConfig = field(default_factory=SourceConfig)
     log_level: str = "INFO"
@@ -107,6 +120,7 @@ def load(path: str | Path) -> Config:
     cfg = Config(
         serial=_build(SerialConfig, raw.pop("serial", None), "serial"),
         meter=meter,
+        limits=_build(LimitsConfig, raw.pop("limits", None), "limits"),
         failsafe=_build(FailsafeConfig, raw.pop("failsafe", None), "failsafe"),
         source=_build(SourceConfig, raw.pop("source", None), "source"),
         log_level=raw.pop("log_level", "INFO"),
@@ -149,5 +163,29 @@ def _validate(cfg: Config) -> None:
     if src.mode not in ("push", "poll"):
         raise ValueError("source.mode must be 'push' or 'poll'")
 
+    lim = cfg.limits
+    if lim.installation_current_a <= 0:
+        raise ValueError("limits.installation_current_a must be positive")
+    cap = lim.charger_max_current_a
+    if cap is not None:
+        if cap < 6:
+            raise ValueError(
+                "limits.charger_max_current_a must be at least 6 A -- below that the "
+                "charger cannot charge at all and will simply stop"
+            )
+        if cap > lim.installation_current_a:
+            raise ValueError(
+                f"limits.charger_max_current_a ({cap} A) exceeds "
+                f"limits.installation_current_a ({lim.installation_current_a} A), "
+                "so it would never take effect"
+            )
+
     if cfg.failsafe.current_a <= 0:
         raise ValueError("failsafe.current_a must be positive")
+    if cfg.failsafe.current_a <= lim.installation_current_a:
+        raise ValueError(
+            f"failsafe.current_a ({cfg.failsafe.current_a} A) must be above "
+            f"limits.installation_current_a ({lim.installation_current_a} A), otherwise "
+            "the charger reads it as 'exactly at the limit' and holds its current "
+            "instead of backing off"
+        )

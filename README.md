@@ -107,10 +107,9 @@ Inside the charger, also set:
 
 - the **RS485 switch to position `T`** (bus termination — you are the only
   slave, so termination belongs at both ends);
-- the **rotary switch to the installation limit**. Positions map to
-  `1=6A  2=10A  3=13A  4=16A  5=20A  6=25A  7=32A`. With a 35 A main fuse,
-  position 7 (32 A) is the maximum, and starting at 4 (16 A) while testing is
-  wiser.
+- the **rotary switch to the maximum charging current**. Positions map to
+  `1=6A  2=10A  3=13A  4=16A  5=20A  6=25A  7=32A`. Set **position 4 (16 A)** —
+  see below.
 
 ## Install
 
@@ -213,6 +212,56 @@ the app. Work down this list.
    an EM340 or a P1 module makes the charger speak a different register map
    entirely.
 
+## Capping the charger
+
+The charger must never draw more than **16 A**. That is enforced in two
+independent places, and you want both.
+
+**In the charger — the actual guarantee.** Set the internal rotary switch to
+position 4 (16 A), and the maximum charging current in the myWallbox app to 16 A
+as well. This is enforced by the charger's own firmware. It holds if this
+service crashes, if the RS485 cable falls out, if Home Assistant is down, and
+if every assumption in this repo about the Power Boost algorithm turns out to
+be wrong. Nothing here can override it.
+
+**In the emulator — so load management aims at the same number.** Set:
+
+```yaml
+limits:
+  installation_current_a: 35.0   # your main fuse, matching the app's Load Management
+  charger_max_current_a: 16.0
+```
+
+A meter cannot address the charger, and it cannot tell the charger's draw apart
+from the rest of the house — it sees one number at the connection point. So the
+emulator does the only thing a meter can: it describes a house in which the
+charger's allowance works out to 16 A. The charger's rule is roughly
+
+```
+allowance = installation_limit - (meter_current - own_current)
+```
+
+so reporting a constant 19 A (35 − 16) of phantom load moves the equilibrium
+from the fuse rating down to the cap. Real house load still subtracts on top,
+exactly as before: with 10 A of house load the charger is told 29 A, and takes
+6 A. On the export side the same setting clamps the surplus advertised to
+Eco-Smart, so solar charging aims at 16 A too.
+
+Two consequences worth knowing:
+
+- **The meter will read high.** With an idle house the charger sees 4.4 kW that
+  does not exist, and the app may show it. That is the mechanism working, not a
+  bug. Logs print both figures: `grid +230 W / 1.00 A (reporting +4600 W / 20.00 A)`.
+- **While you are exporting, the cap loosens.** Net production offsets the
+  phantom load, so the ceiling drifts up towards 16 A + whatever you are
+  exporting. This is the gap the rotary switch closes, which is why it is not
+  optional.
+
+If you would rather keep the meter honest, set `installation_current_a: 16.0`
+and the app's Load Management to 16 A as well. Then no phantom load is needed —
+at the cost of limiting the whole house to 16 A, leaving most of your 35 A fuse
+unused whenever the car is charging.
+
 ## Solar charging
 
 A real CT reports current as an unsigned magnitude and puts the direction in the
@@ -227,9 +276,15 @@ costs nothing to try.
 ## Failsafe
 
 If no fresh reading arrives within `failsafe.max_data_age_s` (default 15 s), the
-emulator reports `failsafe.current_a` (default 35 A, the fuse rating) instead of
-the last known value. The charger sees the installation at its limit and backs
-down to its minimum.
+emulator reports `failsafe.current_a` (default 50 A) instead of the last known
+value. The charger sees the installation well past its limit and backs down to
+its minimum.
+
+That value has to sit *above* `limits.installation_current_a`, and the config
+refuses to start otherwise. Reporting exactly the limit is a fixed point of the
+charger's control loop — `allowance = limit - (limit - own_current) = own_current`
+— so it would hold whatever current it was already drawing rather than back off.
+Overshooting the limit is what forces it down.
 
 This matters more than it looks. Home Assistant restarting, Wi-Fi dropping, or
 the P1 reader hanging all leave the last reading looking perfectly plausible —

@@ -161,6 +161,69 @@ def main() -> int:
     strict.update(power_w=100.0, voltage=230.0)
     check("fresh data leaves the failsafe", not strict.snapshot().stale)
 
+    print("\ncharger cap (installation 35 A, cap 16 A)")
+    capped = MeterModel(nominal_voltage=230.0, max_data_age_s=60.0,
+                        installation_current_a=35.0, charger_max_current_a=16.0)
+    # Idle house: the charger should be told it already has 19 A of load, so
+    # that its allowance (35 - 19) lands exactly on the 16 A cap.
+    capped.update(power_w=0.0, voltage=230.0)
+    snap = capped.snapshot()
+    check("an idle house reports the headroom as phantom load",
+          abs(snap.current - 19.0) < 0.01, f"{snap.current:.2f} A")
+    check("the true measurement is still available for logging",
+          snap.measured_power_w == 0.0)
+
+    # 10 A of real house load must still subtract from the charger's share.
+    capped.update(power_w=10 * 230.0, voltage=230.0)
+    snap = capped.snapshot()
+    check("real house load still eats into the allowance",
+          abs(snap.current - 29.0) < 0.01, f"{snap.current:.2f} A, allowance 35-29 = 6 A")
+
+    # Large export: never advertise more surplus than the cap.
+    capped.update(power_w=-10000.0, voltage=230.0)
+    snap = capped.snapshot()
+    check("advertised solar surplus is clamped to the cap",
+          abs(snap.active_power_kw * 1000 + 16 * 230.0) < 1.0,
+          f"{snap.active_power_kw * 1000:.0f} W of {-10000:.0f} W actual")
+
+    # Continuity: no step at the import/export boundary, or the charger hunts.
+    capped.update(power_w=-1.0, voltage=230.0)
+    below = capped.snapshot().active_power_kw
+    capped.update(power_w=1.0, voltage=230.0)
+    above = capped.snapshot().active_power_kw
+    check("the transform is continuous across zero", abs(above - below) < 0.01,
+          f"{below * 1000:.0f} W -> {above * 1000:.0f} W")
+
+    uncapped = MeterModel(nominal_voltage=230.0, max_data_age_s=60.0,
+                          installation_current_a=35.0, charger_max_current_a=None)
+    uncapped.update(power_w=-10000.0, voltage=230.0)
+    check("with the cap disabled the meter reports the truth",
+          abs(uncapped.snapshot().active_power_kw + 10.0) < 0.001)
+
+    print("\nconfig validation")
+    from wallbox_powerboost.config import FailsafeConfig, LimitsConfig  # noqa: E402
+    from wallbox_powerboost.config import Config, _validate  # noqa: E402
+
+    def rejects(name, **kw):
+        cfg = Config()
+        cfg.source.token = "x"
+        cfg.source.power_entity = "sensor.x"
+        for key, value in kw.items():
+            section, _, attr = key.partition("__")
+            setattr(getattr(cfg, section), attr, value)
+        try:
+            _validate(cfg)
+        except ValueError:
+            check(name, True)
+            return
+        check(name, False, "was accepted")
+
+    rejects("a cap above the installation limit is rejected",
+            limits__charger_max_current_a=40.0)
+    rejects("a cap below 6 A is rejected", limits__charger_max_current_a=3.0)
+    rejects("a failsafe at exactly the installation limit is rejected",
+            failsafe__current_a=35.0)
+
     print("\nenergy integration")
     acc = MeterModel(nominal_voltage=230.0, max_data_age_s=60.0)
     acc.update(power_w=3600.0)

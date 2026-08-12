@@ -55,13 +55,34 @@ meter:
     parity_code: 1       # 1 = even
     software_crc: 0
 
+limits:
+  # The ceiling the charger balances against. This must match "maximum
+  # current per phase" in the myWallbox app under Load Management. Set it to
+  # your main fuse rating so the house can use the whole connection.
+  installation_current_a: 35.0
+
+  # Never let the charger draw more than this. The emulator enforces it by
+  # reporting the difference as phantom house load, so Power Boost settles at
+  # this figure instead of at installation_current_a, and by never advertising
+  # more solar surplus than this to Eco-Smart.
+  #
+  # Set the charger's internal rotary switch to the same number as well
+  # (position 4 = 16 A). That limit is enforced inside the charger and holds
+  # even when this service is not running -- see README, "Capping the charger".
+  # null disables the cap and reports the meter values untouched.
+  charger_max_current_a: 16.0
+
 failsafe:
   # If no fresh reading arrives within this many seconds, report
   # failsafe.current_a so the charger backs off. Do not raise this much:
-  # it is the window in which the charger may be pulling 32 A against a
-  # 35 A fuse on data you can no longer vouch for.
+  # it is the window in which the charger may be pulling its maximum against
+  # a 35 A fuse on data you can no longer vouch for.
   max_data_age_s: 15
-  current_a: 35.0
+
+  # Must be above limits.installation_current_a. Reporting exactly the limit
+  # is a fixed point of the charger's control loop -- it would hold its
+  # current rather than back off.
+  current_a: 50.0
 
 source:
   type: homeassistant
