@@ -61,16 +61,17 @@ limits:
   # your main fuse rating so the house can use the whole connection.
   installation_current_a: 35.0
 
-  # Never let the charger draw more than this. The emulator enforces it by
-  # reporting the difference as phantom house load, so Power Boost settles at
-  # this figure instead of at installation_current_a, and by never advertising
-  # more solar surplus than this to Eco-Smart.
+  # Optional meter-side cap on what the charger may draw. Off by default:
+  # cap the charger with its internal rotary switch instead (position 4 =
+  # 16 A), which the charger enforces itself and which stays true even when
+  # this service is not running.
   #
-  # Set the charger's internal rotary switch to the same number as well
-  # (position 4 = 16 A). That limit is enforced inside the charger and holds
-  # even when this service is not running -- see README, "Capping the charger".
-  # null disables the cap and reports the meter values untouched.
-  charger_max_current_a: 16.0
+  # Setting a value here reports the difference from installation_current_a as
+  # phantom house load, which shifts where Power Boost settles. That makes the
+  # meter read high, and it loosens while you are exporting. Only reach for it
+  # if you need to cap below the app's limit without touching hardware.
+  # See README, "Capping the charger at 16 A".
+  charger_max_current_a: null
 
 failsafe:
   # If no fresh reading arrives within this many seconds, report

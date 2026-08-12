@@ -56,8 +56,9 @@ class LimitsConfig:
     # Must match "maximum current per phase" in the myWallbox app's Load
     # Management settings -- the ceiling the charger balances against.
     installation_current_a: float = 35.0
-    # Never let the charger's allowance exceed this. null disables the cap.
-    charger_max_current_a: float | None = 16.0
+    # Optional meter-side cap on the charger's allowance. Off by default --
+    # the charger's own rotary switch is the better place for this.
+    charger_max_current_a: float | None = None
 
 
 @dataclass

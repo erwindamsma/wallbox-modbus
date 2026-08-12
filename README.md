@@ -181,10 +181,11 @@ If you see nothing at all: swap D+ and D−. It is the usual answer.
 the `0x4000` range followed by **steady polling of `0x500A` and `0x5012`** about
 once a second. That steady poll *is* the handshake succeeding.
 
-**4. Prove the throttling.** Set the charger low (16 A), start a charge, then
-switch on an oven or a kettle and watch the charging current drop within a few
-seconds. Verify in the myWallbox app that it shows the reduced limit rather than
-an error.
+**4. Prove the throttling.** With the rotary switch at 16 A, start a charge and
+confirm it settles there. Then switch on an oven or a kettle and watch the
+charging current drop below 16 A within a few seconds — that is Power Boost
+working, as opposed to the charger merely sitting at its own limit. Verify in
+the myWallbox app that it shows a reduced limit rather than an error.
 
 ## If the charger will not accept the meter
 
@@ -212,55 +213,41 @@ the app. Work down this list.
    an EM340 or a P1 module makes the charger speak a different register map
    entirely.
 
-## Capping the charger
+## Capping the charger at 16 A
 
-The charger must never draw more than **16 A**. That is enforced in two
-independent places, and you want both.
+Set the charger's internal **rotary switch to position 4 (16 A)**. That is the
+cap, and it is the right place for it: enforced by the charger's own firmware,
+so it holds if this service crashes, if the RS485 cable falls out, if Home
+Assistant is down, and if every assumption in this repo about the Power Boost
+algorithm turns out to be wrong. Nothing here can override it.
 
-**In the charger — the actual guarantee.** Set the internal rotary switch to
-position 4 (16 A), and the maximum charging current in the myWallbox app to 16 A
-as well. This is enforced by the charger's own firmware. It holds if this
-service crashes, if the RS485 cable falls out, if Home Assistant is down, and
-if every assumption in this repo about the Power Boost algorithm turns out to
-be wrong. Nothing here can override it.
-
-**In the emulator — so load management aims at the same number.** Set:
+Leave load management aimed at the real fuse:
 
 ```yaml
 limits:
-  installation_current_a: 35.0   # your main fuse, matching the app's Load Management
-  charger_max_current_a: 16.0
+  installation_current_a: 35.0   # matches "maximum current per phase" in the app
+  charger_max_current_a: null    # no meter-side cap; report the truth
 ```
 
-A meter cannot address the charger, and it cannot tell the charger's draw apart
-from the rest of the house — it sees one number at the connection point. So the
-emulator does the only thing a meter can: it describes a house in which the
-charger's allowance works out to 16 A. The charger's rule is roughly
+The two limits then do separate jobs, which is why this combination behaves
+well in every case:
 
-```
-allowance = installation_limit - (meter_current - own_current)
-```
+| Situation | Result |
+|---|---|
+| House idle | Charger takes 16 A, its own maximum. Total is half the fuse. |
+| House drawing 25 A | Power Boost allows 10 A, below the cap, so it throttles. |
+| Exporting solar | Eco-Smart uses the real surplus, and the switch stops it at 16 A. |
+| This service dies | Charger is still hard-limited to 16 A against a 35 A fuse. |
 
-so reporting a constant 19 A (35 − 16) of phantom load moves the equilibrium
-from the fuse rating down to the cap. Real house load still subtracts on top,
-exactly as before: with 10 A of house load the charger is told 29 A, and takes
-6 A. On the export side the same setting clamps the surplus advertised to
-Eco-Smart, so solar charging aims at 16 A too.
+The meter reports measured values untouched, so what you see in the app is what
+your house is actually doing.
 
-Two consequences worth knowing:
-
-- **The meter will read high.** With an idle house the charger sees 4.4 kW that
-  does not exist, and the app may show it. That is the mechanism working, not a
-  bug. Logs print both figures: `grid +230 W / 1.00 A (reporting +4600 W / 20.00 A)`.
-- **While you are exporting, the cap loosens.** Net production offsets the
-  phantom load, so the ceiling drifts up towards 16 A + whatever you are
-  exporting. This is the gap the rotary switch closes, which is why it is not
-  optional.
-
-If you would rather keep the meter honest, set `installation_current_a: 16.0`
-and the app's Load Management to 16 A as well. Then no phantom load is needed —
-at the cost of limiting the whole house to 16 A, leaving most of your 35 A fuse
-unused whenever the car is charging.
+There is also a meter-side cap (`charger_max_current_a`), which works by
+reporting the difference between the fuse rating and the cap as phantom house
+load — that shifts where Power Boost settles. It exists for capping below the
+app's limit without touching hardware, but it makes the meter read high and it
+loosens while you are exporting, because net production offsets the phantom
+load. The rotary switch has neither problem. Use the switch.
 
 ## Solar charging
 
