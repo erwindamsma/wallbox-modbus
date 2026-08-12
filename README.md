@@ -221,13 +221,8 @@ so it holds if this service crashes, if the RS485 cable falls out, if Home
 Assistant is down, and if every assumption in this repo about the Power Boost
 algorithm turns out to be wrong. Nothing here can override it.
 
-Leave load management aimed at the real fuse:
-
-```yaml
-limits:
-  installation_current_a: 35.0   # matches "maximum current per phase" in the app
-  charger_max_current_a: null    # no meter-side cap; report the truth
-```
+Leave load management aimed at the real fuse — "maximum current per phase" in
+the app, and `limits.installation_current_a: 35.0` here to match.
 
 The two limits then do separate jobs, which is why this combination behaves
 well in every case:
@@ -242,12 +237,11 @@ well in every case:
 The meter reports measured values untouched, so what you see in the app is what
 your house is actually doing.
 
-There is also a meter-side cap (`charger_max_current_a`), which works by
-reporting the difference between the fuse rating and the cap as phantom house
-load — that shifts where Power Boost settles. It exists for capping below the
-app's limit without touching hardware, but it makes the meter read high and it
-loosens while you are exporting, because net production offsets the phantom
-load. The rotary switch has neither problem. Use the switch.
+The emulator deliberately has no current limit of its own. A meter cannot
+address the charger and cannot tell the charger's draw apart from the rest of
+the house — it only sees one number at the connection point — so anything it
+did here would amount to lying about the load, and would come apart exactly
+when you are exporting. The limit belongs in the charger.
 
 ## Solar charging
 

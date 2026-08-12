@@ -54,11 +54,9 @@ class MeterConfig:
 @dataclass
 class LimitsConfig:
     # Must match "maximum current per phase" in the myWallbox app's Load
-    # Management settings -- the ceiling the charger balances against.
+    # Management settings -- the ceiling the charger balances against. The
+    # emulator does not enforce this; it uses it to sanity-check the failsafe.
     installation_current_a: float = 35.0
-    # Optional meter-side cap on the charger's allowance. Off by default --
-    # the charger's own rotary switch is the better place for this.
-    charger_max_current_a: float | None = None
 
 
 @dataclass
@@ -167,20 +165,6 @@ def _validate(cfg: Config) -> None:
     lim = cfg.limits
     if lim.installation_current_a <= 0:
         raise ValueError("limits.installation_current_a must be positive")
-    cap = lim.charger_max_current_a
-    if cap is not None:
-        if cap < 6:
-            raise ValueError(
-                "limits.charger_max_current_a must be at least 6 A -- below that the "
-                "charger cannot charge at all and will simply stop"
-            )
-        if cap > lim.installation_current_a:
-            raise ValueError(
-                f"limits.charger_max_current_a ({cap} A) exceeds "
-                f"limits.installation_current_a ({lim.installation_current_a} A), "
-                "so it would never take effect"
-            )
-
     if cfg.failsafe.current_a <= 0:
         raise ValueError("failsafe.current_a must be positive")
     if cfg.failsafe.current_a <= lim.installation_current_a:

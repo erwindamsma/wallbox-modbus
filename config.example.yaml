@@ -57,21 +57,13 @@ meter:
 
 limits:
   # The ceiling the charger balances against. This must match "maximum
-  # current per phase" in the myWallbox app under Load Management. Set it to
-  # your main fuse rating so the house can use the whole connection.
-  installation_current_a: 35.0
-
-  # Optional meter-side cap on what the charger may draw. Off by default:
-  # cap the charger with its internal rotary switch instead (position 4 =
-  # 16 A), which the charger enforces itself and which stays true even when
-  # this service is not running.
+  # current per phase" in the myWallbox app under Load Management -- set both
+  # to your main fuse rating so the house can use the whole connection.
   #
-  # Setting a value here reports the difference from installation_current_a as
-  # phantom house load, which shifts where Power Boost settles. That makes the
-  # meter read high, and it loosens while you are exporting. Only reach for it
-  # if you need to cap below the app's limit without touching hardware.
-  # See README, "Capping the charger at 16 A".
-  charger_max_current_a: null
+  # The emulator does not enforce this; the charger does. It is here so the
+  # failsafe below can be checked against it. The charger's own maximum is set
+  # by its internal rotary switch -- position 4 for 16 A.
+  installation_current_a: 35.0
 
 failsafe:
   # If no fresh reading arrives within this many seconds, report

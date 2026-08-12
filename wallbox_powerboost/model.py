@@ -27,9 +27,6 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Measurement:
-    # What the grid actually did, before the charger cap is applied. Reported
-    # values are the other fields; this one exists so logs can show both.
-    measured_power_w: float
     voltage: float
     frequency: float
     current: float
@@ -52,8 +49,6 @@ class MeterModel:
         current_sign: str = "magnitude",
         max_data_age_s: float = 15.0,
         failsafe_current_a: float = 50.0,
-        installation_current_a: float = 35.0,
-        charger_max_current_a: float | None = None,
         energy_file: str | None = None,
         save_interval_s: float = 60.0,
     ):
@@ -61,8 +56,6 @@ class MeterModel:
         self.current_sign = current_sign
         self.max_data_age_s = max_data_age_s
         self.failsafe_current_a = failsafe_current_a
-        self.installation_current_a = installation_current_a
-        self.charger_max_current_a = charger_max_current_a
         self.energy_file = Path(energy_file) if energy_file else None
         self.save_interval_s = save_interval_s
 
@@ -112,7 +105,6 @@ class MeterModel:
             age = math.inf if self._last_update is None else now - self._last_update
             stale = age > self.max_data_age_s
             voltage = self._voltage or self.nominal_voltage
-            measured_w = self._power_w
 
             if stale:
                 if not self._warned_stale:
@@ -126,8 +118,7 @@ class MeterModel:
                 current = self.failsafe_current_a
                 power_w = self.failsafe_current_a * voltage
             else:
-                measured_w = self._power_w
-                power_w = self._apply_charger_cap(measured_w, voltage)
+                power_w = self._power_w
                 current = abs(power_w) / voltage if voltage else 0.0
                 if self.current_sign == "signed" and power_w < 0:
                     current = -current
@@ -136,7 +127,6 @@ class MeterModel:
 
         apparent = abs(power_w) / 1000.0
         return Measurement(
-            measured_power_w=measured_w,
             voltage=voltage,
             frequency=50.0,
             current=current,
@@ -151,33 +141,6 @@ class MeterModel:
             stale=stale,
             age_s=age if math.isfinite(age) else -1.0,
         )
-
-    def _apply_charger_cap(self, power_w: float, voltage: float) -> float:
-        """Bend the reported load so Power Boost settles at the charger cap.
-
-        A meter cannot address the charger directly, and it cannot tell the
-        charger's own draw apart from the rest of the house -- it sees one
-        number at the connection point. What it can do is describe a house in
-        which the charger's allowance works out to the cap.
-
-        The charger's rule is roughly
-            allowance = installation_limit - (meter_current - own_current)
-        so adding a constant `installation_limit - cap` of phantom load moves
-        the equilibrium from the fuse rating down to the cap, while real house
-        load still subtracts from it exactly as before.
-
-        The floor is the other half: never advertise more solar surplus than
-        the cap, or Eco-Smart will happily ask for all of it.
-
-        Both halves are one expression, which keeps it continuous and monotone
-        across the import/export boundary -- a step there would make the
-        charger hunt.
-        """
-        if self.charger_max_current_a is None:
-            return power_w
-        headroom_w = max(0.0, self.installation_current_a - self.charger_max_current_a) * voltage
-        surplus_floor_w = -self.charger_max_current_a * voltage
-        return max(power_w + headroom_w, surplus_floor_w)
 
     # -- energy counter persistence ---------------------------------------
 

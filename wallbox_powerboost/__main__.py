@@ -38,8 +38,6 @@ def dump_map(cfg) -> None:
         current_sign=cfg.meter.current_sign,
         max_data_age_s=cfg.failsafe.max_data_age_s,
         failsafe_current_a=cfg.failsafe.current_a,
-        installation_current_a=cfg.limits.installation_current_a,
-        charger_max_current_a=cfg.limits.charger_max_current_a,
     )
     model.update(power_w=2300.0, voltage=230.0)
     regs = build_register_map(model.snapshot(), cfg.meter.identity)
@@ -60,13 +58,9 @@ async def status_loop(cfg, model, slave, source, regfile) -> None:
         if slave.locked:
             link = f"{slave.locked[0]} 8{slave.locked[1]}{cfg.serial.stopbits}"
         unmapped = sorted(regfile.unmapped)
-        reported = ""
-        if not m.stale and abs(m.active_power_kw * 1000 - m.measured_power_w) > 1.0:
-            reported = f" (reporting {m.active_power_kw * 1000:+.0f} W / {m.current:.2f} A)"
         log.info(
-            "grid %+.0f W / %.2f A%s%s | modbus: %s, %d requests, %d bad frames%s | HA: %s",
-            m.measured_power_w, abs(m.measured_power_w) / m.voltage,
-            reported, " [FAILSAFE]" if m.stale else "",
+            "grid %+.0f W / %.2f A%s | modbus: %s, %d requests, %d bad frames%s | HA: %s",
+            m.active_power_kw * 1000, m.current, " [FAILSAFE]" if m.stale else "",
             link, slave.requests, slave.bad_frames,
             f", unmapped {[f'0x{a:04X}' for a in unmapped[:8]]}" if unmapped else "",
             "connected" if source.connected else "disconnected",
