@@ -1,0 +1,92 @@
+# Wallbox Power Boost emulator -- example configuration.
+# Copy to config.yaml and edit.
+
+serial:
+  port: /dev/ttyUSB0
+
+  # The N1-CT leaves the factory on 9600 baud, even parity, unit id 1, and
+  # that is what the charger expects. Leave these on "auto" for the first run:
+  # the emulator then listens on each plausible combination until it sees a
+  # CRC-valid frame, and logs which one worked. Pin them afterwards.
+  baud: auto        # auto, 9600, 19200
+  parity: auto      # auto, even, none, odd
+  stopbits: 1
+  unit_id: 1
+  probe_seconds: 8
+
+  # Most USB-RS485 dongles switch direction by themselves. Set this only if
+  # yours needs RTS to key the transmitter.
+  rts_direction_control: false
+  rts_active_high: true
+  # Enable if your adapter loops transmitted bytes back into the receiver.
+  discard_echo: false
+
+meter:
+  nominal_voltage: 230.0
+
+  # A real CT reports current as an unsigned magnitude and puts the direction
+  # in the sign of active power. "magnitude" reproduces that faithfully.
+  # Switch to "signed" only if testing shows the charger throttles when you
+  # are exporting to the grid -- see README, "Solar charging".
+  current_sign: magnitude
+
+  # What to answer when the charger reads a register the N1-CT does not have.
+  # "zero" is permissive and keeps the handshake alive; "exception" is what
+  # real hardware does. Start permissive.
+  unknown_register_policy: zero
+
+  # Energy counters are integrated from power and survive restarts.
+  energy_file: /var/lib/wallbox-powerboost/energy.json
+
+  # Values the charger reads once at startup to identify the meter. The
+  # measurement registers are documented; this identity block is where the
+  # guesswork lives. If Power Boost never activates, this is the first place
+  # to look -- see README, "If the charger does not accept the meter".
+  identity:
+    serial_number: 20250001
+    meter_code: 0
+    modbus_id: 1
+    baud_code: 9600
+    protocol_version: 1.0
+    software_version: 1.17
+    hardware_version: 1.0
+    meter_amps: 100      # CT primary rating of a real N1-CT
+    combination_code: 5  # 05 = forward + reverse
+    parity_code: 1       # 1 = even
+    software_crc: 0
+
+failsafe:
+  # If no fresh reading arrives within this many seconds, report
+  # failsafe.current_a so the charger backs off. Do not raise this much:
+  # it is the window in which the charger may be pulling 32 A against a
+  # 35 A fuse on data you can no longer vouch for.
+  max_data_age_s: 15
+  current_a: 35.0
+
+source:
+  type: homeassistant
+  url: http://homeassistant.local:8123
+  token: "PASTE_A_LONG_LIVED_ACCESS_TOKEN_HERE"
+
+  mode: push          # push = WebSocket (instant), poll = REST
+  poll_interval_s: 1.0
+
+  # Preferred: one sensor holding net grid power, positive when importing and
+  # negative when exporting. On a Dutch P1 reader this is usually
+  # sensor.power_consumption_phase_l1 minus production, or a template sensor.
+  power_entity: sensor.p1_meter_active_power
+
+  # Alternative: separate import and export sensors (both positive).
+  # Used only when power_entity is unset.
+  import_entity: null
+  export_entity: null
+
+  # Optional. Improves the power-to-current conversion; falls back to
+  # meter.nominal_voltage when absent.
+  voltage_entity: sensor.p1_meter_voltage_phase_l1
+
+  # Override unit detection if the entity has no unit_of_measurement.
+  power_unit: null    # W, kW
+
+log_level: INFO
+status_interval_s: 10

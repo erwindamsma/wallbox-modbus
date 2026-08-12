@@ -1,0 +1,29 @@
+[Unit]
+Description=Wallbox Power Boost meter emulator (INEPRO N1-CT over Modbus RTU)
+Documentation=https://github.com/local/wallbox-modbus
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The user must be in the dialout group to reach /dev/ttyUSB*.
+User=wallbox
+SupplementaryGroups=dialout
+WorkingDirectory=/opt/wallbox-modbus
+ExecStart=/opt/wallbox-modbus/.venv/bin/python -m wallbox_powerboost -c /etc/wallbox-powerboost/config.yaml
+Restart=always
+RestartSec=5
+
+# Creates and owns /var/lib/wallbox-powerboost for the energy counters.
+StateDirectory=wallbox-powerboost
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
