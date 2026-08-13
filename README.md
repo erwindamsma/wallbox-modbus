@@ -151,6 +151,22 @@ meter's place:
 **GND must be connected.** RS485 is differential but not ground-referenced;
 skipping it works on the bench and fails intermittently in a meter cupboard.
 
+**Keep D+ and D− on the same twisted pair** — blue with blue/white, say — and
+take GND from a conductor in a *different* pair, such as brown. The twist is
+the entire noise-rejection mechanism: interference hits both wires equally and
+cancels in the difference. Splitting the two across separate pairs undoes that,
+and it fails as intermittent bad frames rather than as an obvious break. Spare
+conductors can be left unconnected, or doubled up on GND.
+
+If the cable has a shield, earth it at **one end only**, or it becomes a ground
+loop between two points that are not at the same potential — which matters more
+when one end is outdoors.
+
+At 9600 baud a house-length run needs no termination beyond the charger's `T`
+switch: a bit lasts 104 µs and reflections over 50 m settle in under a
+microsecond. If the `bad frames` counter in the status line climbs, add 120 Ω
+across A and B at the adapter end before suspecting anything else.
+
 Wallbox's own P1-port module is wired the same way and takes its power from the
 P1 port rather than the charger, so leaving `12V` unused is a supported layout,
 not a hack.
