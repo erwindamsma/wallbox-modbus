@@ -75,9 +75,21 @@ a short feedback loop, not a fishing expedition — see
 
 ## Hardware
 
-- A USB-RS485 adapter. Prefer one with automatic direction control (CH340,
+- A USB-**RS485** adapter. Prefer one with automatic direction control (CH340,
   CP2102 or FTDI based). If yours needs RTS keying, set
   `serial.rts_direction_control: true`.
+
+  Not a USB-**TTL** adapter — the cheap "USB-STC-ISP" programmers are TTL.
+  TTL is single-ended 3.3/5 V UART referenced to ground; RS485 is a
+  differential pair, which is what survives a long run past switching loads.
+  They are not interchangeable, and putting TTL levels on A/B risks damage,
+  because RS485 lines can sit well outside TTL common-mode range.
+
+  A USB-TTL adapter does work behind a TTL↔RS485 module with **automatic**
+  direction control (HW-0519, XY-017, or similar). Avoid plain MAX485
+  breakouts with DE/RE pins that need manual keying: most USB-TTL boards do
+  not expose RTS, and USB latency makes the send/receive turnaround late
+  enough to truncate your own reply.
 - Three-core shielded cable from the box running this to the charger (the
   Wallbox guide specifies STP Cat-5e, up to 500 m).
 - Optionally a second USB-RS485 adapter, to test on the bench with
