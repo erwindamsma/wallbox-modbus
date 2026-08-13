@@ -75,65 +75,13 @@ a short feedback loop, not a fishing expedition — see
 
 ## Hardware
 
-- A USB-**RS485** adapter. Prefer one with automatic direction control (CH340,
+- A USB-RS485 adapter. Prefer one with automatic direction control (CH340,
   CP2102 or FTDI based). If yours needs RTS keying, set
   `serial.rts_direction_control: true`.
-
-  Not a USB-**TTL** adapter — the cheap "USB-STC-ISP" programmers are TTL.
-  TTL is single-ended 3.3/5 V UART referenced to ground; RS485 is a
-  differential pair, which is what survives a long run past switching loads.
-  They are not interchangeable, and putting TTL levels on A/B risks damage,
-  because RS485 lines can sit well outside TTL common-mode range.
-
-  A USB-TTL adapter does work behind a TTL↔RS485 module with **automatic**
-  direction control (HW-0519, XY-017, or similar). Avoid plain MAX485
-  breakouts with DE/RE pins that need manual keying: most USB-TTL boards do
-  not expose RTS, and USB latency makes the send/receive turnaround late
-  enough to truncate your own reply.
 - Three-core shielded cable from the box running this to the charger (the
-  Wallbox guide specifies STP Cat-5e, up to 500 m) — unless you bridge over
-  WiFi, see below.
+  Wallbox guide specifies STP Cat-5e, up to 500 m).
 - Optionally a second USB-RS485 adapter, to test on the bench with
   [tools/test_master.py](tools/test_master.py) before touching the charger.
-
-## Over WiFi instead of a cable run
-
-If the machine running this is nowhere near the charger, put a **serial-to-WiFi
-bridge** at the charger instead of pulling Cat-5e through the house. An ESP8266
-board (Wemos D1 mini) or ESP32 with an RS485 transceiver does the job, and the
-service keeps running wherever it already runs.
-
-```yaml
-serial:
-  port: socket://192.168.1.60:8880   # the bridge, not a local device
-```
-
-Any `://` in `serial.port` switches to a network transport. Set 9600 8E1 **on
-the bridge**, because framing is applied by the bridge's own UART — there is
-nothing for this end to configure, so baud and parity probing is skipped.
-
-Firmware options, in order of least work:
-
-- **Tasmota**: `Baudrate 9600`, `SerialConfig 8E1`, `TCPStart 8880`.
-- **ESPHome** with the `stream_server` external component.
-- Twenty lines of Arduino pumping bytes between `Serial` and a `WiFiClient`.
-
-Two things to get right on an ESP8266:
-
-- **Use a 3.3 V transceiver** (MAX3485, SP3485, or an auto-direction module
-  specified for 3.3 V). ESP8266 pins are not 5 V tolerant, and a 5 V RS485
-  module will drive its receive output straight into a pin that cannot take it.
-- **It has one usable hardware UART.** UART0 is shared with the USB serial
-  console, so the bridge takes it and you lose the console; UART1 is
-  transmit-only. Tasmota and ESPHome both handle this, but do the initial
-  flashing before wiring the transceiver to those pins.
-
-The trade is reliability. A USB adapter fails only if the cable falls out; WiFi
-adds an access point, a DHCP lease and radio interference to the list. Frames
-here are delimited by length and CRC rather than by idle gaps, so TCP chunking
-is harmless — but a WiFi dropout looks to the charger like a meter that stopped
-answering, which is a fault rather than a throttle. If the charger sits within
-reach of a cable, use the cable.
 
 ## Wiring
 
@@ -150,27 +98,6 @@ meter's place:
 
 **GND must be connected.** RS485 is differential but not ground-referenced;
 skipping it works on the bench and fails intermittently in a meter cupboard.
-
-**Keep D+ and D− on the same twisted pair** — blue with blue/white, say — and
-take GND from a conductor in a *different* pair, such as brown. The twist is
-the entire noise-rejection mechanism: interference hits both wires equally and
-cancels in the difference. Splitting the two across separate pairs undoes that,
-and it fails as intermittent bad frames rather than as an obvious break. Spare
-conductors can be left unconnected, or doubled up on GND.
-
-Doubling conductors onto D+ and D− is only useful if each pair still carries
-one of each — `D+` on blue and orange, `D−` on blue/white and orange/white.
-Putting both halves of a pair on the same polarity gives you a thicker wire and
-no twist where it counts.
-
-If the cable has a shield, earth it at **one end only**, or it becomes a ground
-loop between two points that are not at the same potential — which matters more
-when one end is outdoors.
-
-At 9600 baud a house-length run needs no termination beyond the charger's `T`
-switch: a bit lasts 104 µs and reflections over 50 m settle in under a
-microsecond. If the `bad frames` counter in the status line climbs, add 120 Ω
-across A and B at the adapter end before suspecting anything else.
 
 Wallbox's own P1-port module is wired the same way and takes its power from the
 P1 port rather than the charger, so leaving `12V` unused is a supported layout,

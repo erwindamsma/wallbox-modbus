@@ -111,19 +111,9 @@ class ModbusRtuSlave(threading.Thread):
         self.bad_frames = 0
         self.last_request_at: float | None = None
 
-        # A "socket://host:port" style port is a serial-to-WiFi bridge. The real
-        # UART settings live on the bridge, so there is nothing to probe here
-        # and nothing we could change from this end.
-        self.is_bridge = "://" in str(cfg.port)
-
         fixed_baud = cfg.baud if isinstance(cfg.baud, int) else None
         fixed_parity = cfg.parity if cfg.parity in PARITY_NAMES else None
-        if self.is_bridge:
-            baud = fixed_baud or 9600
-            parity = fixed_parity or "E"
-            self._candidates = [(baud, parity)]
-            self.locked = (baud, parity)
-        elif fixed_baud and fixed_parity:
+        if fixed_baud and fixed_parity:
             self._candidates = [(fixed_baud, fixed_parity)]
             self.locked = (fixed_baud, fixed_parity)
         elif fixed_baud:
@@ -162,13 +152,6 @@ class ModbusRtuSlave(threading.Thread):
                     break  # _serve only returns on stop/reopen once locked
 
     def _open(self, baud: int, parity: str) -> serial.Serial:
-        if self.is_bridge:
-            # pyserial accepts and ignores framing settings for URL handlers;
-            # configure those on the bridge itself.
-            ser = serial.serial_for_url(self.cfg.port, timeout=0.005, write_timeout=1.0)
-            log.info("connected to serial bridge %s (framing is set on the bridge, "
-                     "not here)", self.cfg.port)
-            return ser
         ser = serial.Serial(
             port=self.cfg.port,
             baudrate=baud,
@@ -178,7 +161,7 @@ class ModbusRtuSlave(threading.Thread):
             timeout=0.005,
             write_timeout=1.0,
         )
-        if self.cfg.rts_direction_control and not self.is_bridge:
+        if self.cfg.rts_direction_control:
             ser.rts = not self.cfg.rts_active_high
         return ser
 
@@ -267,13 +250,13 @@ class ModbusRtuSlave(threading.Thread):
         self._send(ser, response)
 
     def _send(self, ser: serial.Serial, response: bytes) -> None:
-        if self.cfg.rts_direction_control and not self.is_bridge:
+        if self.cfg.rts_direction_control:
             ser.rts = self.cfg.rts_active_high
         try:
             ser.write(response)
             ser.flush()
         finally:
-            if self.cfg.rts_direction_control and not self.is_bridge:
+            if self.cfg.rts_direction_control:
                 ser.rts = not self.cfg.rts_active_high
         if self.cfg.discard_echo:
             deadline = time.monotonic() + 0.05
