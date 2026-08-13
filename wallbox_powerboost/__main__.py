@@ -28,6 +28,10 @@ def parse_args(argv=None):
                         "watch what the charger asks for before answering it")
     p.add_argument("--dump-map", action="store_true",
                    help="print the register map that would be served and exit")
+    p.add_argument("--check-source", action="store_true",
+                   help="connect to Home Assistant and print live readings without "
+                        "touching the serial port; use this to verify entities, units "
+                        "and the sign convention before wiring anything")
     p.add_argument("--log-level", help="override log_level from the config")
     return p.parse_args(argv)
 
@@ -48,6 +52,42 @@ def dump_map(cfg) -> None:
         width = 1 if addr + 1 not in regs or addr + 1 in n1ct.REGISTER_NAMES else 2
         words = " ".join(f"{regs[addr + i]:04X}" for i in range(width))
         print(f"0x{addr:04X}  {words:>21}  {name}")
+
+
+async def check_source(cfg, model, source) -> int:
+    """Print what the meter would report, without serving Modbus."""
+    print(f"connecting to {cfg.source.url} ...")
+    print("\nWatch the sign: importing must be POSITIVE. Switch on a kettle — the")
+    print("number should jump UP by a couple of kW. If it jumps down, your sensor is")
+    print("inverted; swap import_entity/export_entity, or use a template sensor.\n")
+
+    task = asyncio.create_task(source.run(), name="source")
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:  # pragma: no cover - non-POSIX
+            pass
+
+    try:
+        while not stop.is_set():
+            m = model.snapshot()
+            if m.stale:
+                age = "never" if m.age_s < 0 else f"{m.age_s:.0f}s ago"
+                print(f"  no usable reading ({age}) -- would report the "
+                      f"{cfg.failsafe.current_a:.0f} A failsafe")
+            else:
+                print(f"  grid {m.active_power_kw * 1000:+8.0f} W   {m.current:6.2f} A   "
+                      f"{m.voltage:5.1f} V   ({m.age_s:.1f}s old)")
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    return 0
 
 
 async def status_loop(cfg, model, slave, source, regfile) -> None:
@@ -84,6 +124,9 @@ async def amain(cfg, args) -> int:
         if parity is not None:
             cfg.serial.parity = parity
         slave.request_reopen()
+
+    if args.check_source:
+        return await check_source(cfg, model, HomeAssistantSource(cfg.source, model))
 
     regfile = RegisterFile(
         model, cfg.meter.identity,

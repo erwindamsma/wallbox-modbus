@@ -149,19 +149,46 @@ journalctl -fu wallbox-powerboost
 
 Work through this in order — each step fails in a way that tells you something.
 
-**1. Bench test, no charger.** With two USB-RS485 adapters wired A–A, B–B:
+**1. Test the logic — no hardware needed.**
 
 ```bash
-./.venv/bin/python tools/selftest.py          # framing, registers, failsafe (no hardware)
-./.venv/bin/python -m wallbox_powerboost -c config.yaml &
-./.venv/bin/python tools/test_master.py /dev/ttyUSB1
+./.venv/bin/python tools/selftest.py
 ```
 
-`test_master.py` polls the same registers the charger does and prints decoded
-values. If the current it reports tracks your actual house load, the meter side
-is finished.
+Drives the real Modbus slave over a pty pair and checks framing, CRC,
+resynchronisation, the register map, writes and the failsafe.
 
-**2. Listen to the charger before answering it.** Wire it up, enable Power Boost
+**2. Test your Home Assistant setup — no hardware needed.**
+
+```bash
+./.venv/bin/python -m wallbox_powerboost -c config.yaml --check-source
+```
+
+Connects to Home Assistant and prints what the meter would report, without
+touching the serial port. This catches the mistakes that are painful to debug
+later: a wrong entity id, a sensor in kW when you assumed W, and above all the
+**sign convention**. Switch on a kettle — the number must jump *up*. If it
+drops, your sensor is inverted and Power Boost would speed up exactly when it
+should back off.
+
+**3. Test the whole stack — still no hardware.** In three terminals:
+
+```bash
+./.venv/bin/python tools/vlink.py                       # links /tmp/wallbox-a <-> /tmp/wallbox-b
+./.venv/bin/python -m wallbox_powerboost -c config.yaml # with serial.port: /tmp/wallbox-a
+./.venv/bin/python tools/test_master.py /tmp/wallbox-b --parity N
+```
+
+`test_master.py` reads the identity block and then polls the same registers the
+charger does, printing decoded values. If the current it reports tracks your
+real house load, everything except the wiring is finished. Use `parity: none`
+on both sides here — a pseudo-terminal has no UART and does not emulate parity.
+
+**4. Test the wiring.** Same as above but over real RS485, with a second
+USB-RS485 adapter wired A–A, B–B, GND–GND, and `parity: even` restored. This is
+the first step that can tell you anything about cabling and termination.
+
+**5. Listen to the charger before answering it.** Wire it up, enable Power Boost
 in the app, and run:
 
 ```bash
@@ -177,11 +204,11 @@ afterwards.
 
 If you see nothing at all: swap D+ and D−. It is the usual answer.
 
-**3. Answer it.** Drop `--passive`. Success looks like a short burst of reads in
+**6. Answer it.** Drop `--passive`. Success looks like a short burst of reads in
 the `0x4000` range followed by **steady polling of `0x500A` and `0x5012`** about
 once a second. That steady poll *is* the handshake succeeding.
 
-**4. Prove the throttling.** With the rotary switch at 16 A, start a charge and
+**7. Prove the throttling.** With the rotary switch at 16 A, start a charge and
 confirm it settles there. Then switch on an oven or a kettle and watch the
 charging current drop below 16 A within a few seconds — that is Power Boost
 working, as opposed to the charger merely sitting at its own limit. Verify in

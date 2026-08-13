@@ -93,7 +93,9 @@ def main() -> int:
         raw = read(ser, args.unit, addr, count)
         if raw is not None:
             name = n1ct.REGISTER_NAMES.get(addr, "?")
-            print(f"  0x{addr:04X} {name:<24} {decode(raw, kind)}")
+            value = decode(raw, kind)
+            # float32 cannot hold 1.17 exactly; %g hides the rounding noise.
+            print(f"  0x{addr:04X} {name:<24} {value:g}")
 
     print("\npolling measurements (Ctrl-C to stop):")
     try:

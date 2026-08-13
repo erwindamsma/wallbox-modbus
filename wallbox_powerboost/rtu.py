@@ -166,7 +166,15 @@ class ModbusRtuSlave(threading.Thread):
         return ser
 
     def _serve(self, baud: int, parity: str) -> None:
-        ser = self._open(baud, parity)
+        try:
+            ser = self._open(baud, parity)
+        except Exception as exc:
+            # Includes termios errors from ports that reject a setting outright,
+            # which is what a pseudo-terminal does when asked for parity.
+            log.error("cannot open %s at %d 8%s%d: %s",
+                      self.cfg.port, baud, parity, self.cfg.stopbits, exc)
+            time.sleep(2.0)
+            return
         mode = "passive" if self.passive else "active"
         if self.locked == (baud, parity):
             log.info(
