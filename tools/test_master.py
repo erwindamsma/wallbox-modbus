@@ -94,8 +94,10 @@ def main() -> int:
         if raw is not None:
             name = n1ct.REGISTER_NAMES.get(addr, "?")
             value = decode(raw, kind)
-            # float32 cannot hold 1.17 exactly; %g hides the rounding noise.
-            print(f"  0x{addr:04X} {name:<24} {value:g}")
+            # float32 cannot hold 1.17 exactly, so %g hides the rounding noise --
+            # but only for floats, or an 8-digit serial becomes 2.025e+07.
+            text = f"{value:g}" if kind == "f32" else str(value)
+            print(f"  0x{addr:04X} {name:<24} {text}")
 
     print("\npolling measurements (Ctrl-C to stop):")
     try:

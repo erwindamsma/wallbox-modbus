@@ -183,10 +183,13 @@ should back off.
 **3. Test the whole stack — still no hardware.** In three terminals:
 
 ```bash
-./.venv/bin/python tools/vlink.py                       # links /tmp/wallbox-a <-> /tmp/wallbox-b
-./.venv/bin/python -m wallbox_powerboost -c config.yaml # with serial.port: /tmp/wallbox-a
+./.venv/bin/python tools/vlink.py     # links /tmp/wallbox-a <-> /tmp/wallbox-b
+./.venv/bin/python -m wallbox_powerboost -c config.yaml --port /tmp/wallbox-a --parity none
 ./.venv/bin/python tools/test_master.py /tmp/wallbox-b --parity N
 ```
+
+`--port` and `--parity` override the config, so the same `config.yaml` you will
+run for real works here without edits.
 
 `test_master.py` reads the identity block and then polls the same registers the
 charger does, printing decoded values. If the current it reports tracks your

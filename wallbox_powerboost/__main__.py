@@ -36,6 +36,11 @@ def parse_args(argv=None):
                         "touching the serial port; use this to verify entities, units "
                         "and the sign convention before wiring anything")
     p.add_argument("--log-level", help="override log_level from the config")
+    p.add_argument("--port",
+                   help="override serial.port, e.g. a virtual link from tools/vlink.py")
+    p.add_argument("--parity", choices=["even", "none", "odd", "auto"],
+                   help="override serial.parity; use none over a virtual link, which "
+                        "has no UART and cannot emulate parity")
     return p.parse_args(argv)
 
 
@@ -211,6 +216,10 @@ def main(argv=None) -> int:
         # Listing entities is how you find out what to put in power_entity, so
         # it must work before that setting is filled in.
         cfg = config_mod.load(args.config, require_source_entities=not args.list_entities)
+        if args.port:
+            cfg.serial.port = args.port
+        if args.parity:
+            cfg.serial.parity = config_mod.PARITY_ALIASES.get(args.parity, args.parity)
     except FileNotFoundError:
         print(f"config file not found: {args.config}", file=sys.stderr)
         return 2
