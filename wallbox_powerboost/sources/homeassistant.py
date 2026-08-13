@@ -182,3 +182,40 @@ class HomeAssistantSource:
 
 def _t(seconds: float) -> aiohttp.ClientTimeout:
     return aiohttp.ClientTimeout(total=seconds)
+
+
+GRID_HINTS = ("grid", "net", "p1", "smart_meter", "smartmeter", "consumption",
+              "production", "import", "export", "vermogen", "levering", "teruglevering")
+
+
+async def fetch_power_entities(cfg) -> list[dict]:
+    """Every power sensor Home Assistant knows about, for picking one."""
+    base = cfg.url.rstrip("/")
+    headers = {"Authorization": f"Bearer {cfg.token}"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(f"{base}/api/states", timeout=_t(20)) as resp:
+            if resp.status == 401:
+                raise RuntimeError(
+                    "Home Assistant rejected the token. Create a new long-lived "
+                    "access token under your profile -> Security."
+                )
+            resp.raise_for_status()
+            states = await resp.json()
+
+    rows = []
+    for state in states:
+        attrs = state.get("attributes") or {}
+        unit = attrs.get("unit_of_measurement")
+        if attrs.get("device_class") != "power" and unit not in UNIT_TO_WATTS:
+            continue
+        entity = state.get("entity_id", "")
+        rows.append({
+            "entity_id": entity,
+            "state": state.get("state"),
+            "unit": unit,
+            "name": attrs.get("friendly_name", ""),
+            "likely": any(h in entity.lower() or h in str(attrs.get("friendly_name", "")).lower()
+                          for h in GRID_HINTS),
+        })
+    rows.sort(key=lambda r: (not r["likely"], r["entity_id"]))
+    return rows

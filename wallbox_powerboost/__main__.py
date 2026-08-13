@@ -28,6 +28,9 @@ def parse_args(argv=None):
                         "watch what the charger asks for before answering it")
     p.add_argument("--dump-map", action="store_true",
                    help="print the register map that would be served and exit")
+    p.add_argument("--list-entities", action="store_true",
+                   help="list every power sensor in Home Assistant, likeliest grid "
+                        "sensors first, so you can pick one for source.power_entity")
     p.add_argument("--check-source", action="store_true",
                    help="connect to Home Assistant and print live readings without "
                         "touching the serial port; use this to verify entities, units "
@@ -52,6 +55,34 @@ def dump_map(cfg) -> None:
         width = 1 if addr + 1 not in regs or addr + 1 in n1ct.REGISTER_NAMES else 2
         words = " ".join(f"{regs[addr + i]:04X}" for i in range(width))
         print(f"0x{addr:04X}  {words:>21}  {name}")
+
+
+async def list_entities(cfg) -> int:
+    from .sources.homeassistant import fetch_power_entities
+
+    try:
+        rows = await fetch_power_entities(cfg.source)
+    except Exception as exc:
+        print(f"could not reach Home Assistant at {cfg.source.url}: {exc}", file=sys.stderr)
+        return 1
+
+    if not rows:
+        print("Home Assistant reports no power sensors at all. Is your P1 or energy "
+              "integration set up?")
+        return 1
+
+    likely = [r for r in rows if r["likely"]]
+    print(f"{len(rows)} power sensors, {len(likely)} look grid-related (listed first).")
+    print("Pick the one holding NET grid power: positive importing, negative exporting.\n")
+    print(f"{'entity_id':<52} {'state':>12}  unit   name")
+    for row in rows:
+        mark = "*" if row["likely"] else " "
+        unit = row["unit"] or "?"
+        print(f"{mark}{row['entity_id']:<51} {str(row['state']):>12}  {unit:<5}  {row['name']}")
+    print("\nSet it as source.power_entity, then run --check-source.")
+    print("No single signed sensor? Set source.import_entity and source.export_entity "
+          "to a positive pair instead.")
+    return 0
 
 
 async def check_source(cfg, model, source) -> int:
@@ -125,6 +156,9 @@ async def amain(cfg, args) -> int:
             cfg.serial.parity = parity
         slave.request_reopen()
 
+    if args.list_entities:
+        return await list_entities(cfg)
+
     if args.check_source:
         return await check_source(cfg, model, HomeAssistantSource(cfg.source, model))
 
@@ -174,7 +208,9 @@ async def amain(cfg, args) -> int:
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
-        cfg = config_mod.load(args.config)
+        # Listing entities is how you find out what to put in power_entity, so
+        # it must work before that setting is filled in.
+        cfg = config_mod.load(args.config, require_source_entities=not args.list_entities)
     except FileNotFoundError:
         print(f"config file not found: {args.config}", file=sys.stderr)
         return 2

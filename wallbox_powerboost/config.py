@@ -106,7 +106,7 @@ def _build(cls, data, path: str):
     return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def load(path: str | Path) -> Config:
+def load(path: str | Path, require_source_entities: bool = True) -> Config:
     raw = yaml.safe_load(Path(path).read_text()) or {}
     if not isinstance(raw, dict):
         raise ValueError("config file must contain a mapping at the top level")
@@ -128,11 +128,11 @@ def load(path: str | Path) -> Config:
     if raw:
         raise ValueError(f"unknown top-level option(s): {sorted(raw)}")
 
-    _validate(cfg)
+    _validate(cfg, require_source_entities)
     return cfg
 
 
-def _validate(cfg: Config) -> None:
+def _validate(cfg: Config, require_source_entities: bool = True) -> None:
     s = cfg.serial
     if isinstance(s.baud, str) and s.baud != "auto":
         raise ValueError("serial.baud must be a number or 'auto'")
@@ -154,7 +154,8 @@ def _validate(cfg: Config) -> None:
         raise ValueError(f"unsupported source.type {src.type!r}")
     if not src.token:
         raise ValueError("source.token is required (a Home Assistant long-lived token)")
-    if not src.power_entity and not (src.import_entity and src.export_entity):
+    if require_source_entities and not src.power_entity and not (
+            src.import_entity and src.export_entity):
         raise ValueError(
             "set source.power_entity (a signed net-grid sensor), or both "
             "source.import_entity and source.export_entity"

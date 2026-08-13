@@ -158,7 +158,16 @@ Work through this in order — each step fails in a way that tells you something
 Drives the real Modbus slave over a pty pair and checks framing, CRC,
 resynchronisation, the register map, writes and the failsafe.
 
-**2. Test your Home Assistant setup — no hardware needed.**
+**2. Test your Home Assistant setup — no hardware needed.** Fill in `url` and
+`token` in `config.yaml`, then find the sensor to use:
+
+```bash
+./.venv/bin/python -m wallbox_powerboost -c config.yaml --list-entities
+```
+
+This lists every power sensor Home Assistant knows about, ones whose name looks
+grid-related first, with their current values. Put the right one in
+`source.power_entity` and check it:
 
 ```bash
 ./.venv/bin/python -m wallbox_powerboost -c config.yaml --check-source
