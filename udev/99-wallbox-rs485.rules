@@ -1,0 +1,16 @@
+# Udev rules for the RS485 adapter. Install with:
+#   sudo cp udev/99-wallbox-rs485.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+
+# FTDI chips buffer received bytes for up to 16 ms before handing them to
+# userspace. That delay lands squarely on our Modbus response turnaround, so
+# drop it to 1 ms. Harmless on adapters that are already fast.
+ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
+
+# A stable name, so the service cannot end up talking to some other USB serial
+# device after a reboot or when a second adapter is plugged in. Find your
+# adapter's serial number with:
+#   udevadm info -a -n /dev/ttyUSB0 | grep '{serial}' | head -1
+# then put it below and set serial.port: /dev/wallbox-rs485 in the config.
+#
+#SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{serial}=="PUT_YOURS_HERE", SYMLINK+="wallbox-rs485"

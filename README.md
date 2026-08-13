@@ -117,6 +117,24 @@ Inside the charger, also set:
   `1=6A  2=10A  3=13A  4=16A  5=20A  6=25A  7=32A`. Set **position 4 (16 A)** —
   see below.
 
+## Serial port setup
+
+Plug the adapter in and find it with `dmesg | tail`. Then install the udev
+rules, which do two things worth having:
+
+```bash
+sudo cp udev/99-wallbox-rs485.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+- **FTDI latency.** FTDI chips hold received bytes for up to 16 ms before
+  passing them to userspace, which lands directly on our Modbus response
+  turnaround. The rule drops it to 1 ms.
+- **A stable device name.** `/dev/ttyUSB0` is a race: plug in a second adapter,
+  or reboot with another USB serial device present, and the service may open
+  the wrong one. Uncomment the `SYMLINK` line with your adapter's serial
+  number and point `serial.port` at `/dev/wallbox-rs485`.
+
 ## Install
 
 ```bash
