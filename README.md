@@ -91,9 +91,49 @@ a short feedback loop, not a fishing expedition — see
   not expose RTS, and USB latency makes the send/receive turnaround late
   enough to truncate your own reply.
 - Three-core shielded cable from the box running this to the charger (the
-  Wallbox guide specifies STP Cat-5e, up to 500 m).
+  Wallbox guide specifies STP Cat-5e, up to 500 m) — unless you bridge over
+  WiFi, see below.
 - Optionally a second USB-RS485 adapter, to test on the bench with
   [tools/test_master.py](tools/test_master.py) before touching the charger.
+
+## Over WiFi instead of a cable run
+
+If the machine running this is nowhere near the charger, put a **serial-to-WiFi
+bridge** at the charger instead of pulling Cat-5e through the house. An ESP8266
+board (Wemos D1 mini) or ESP32 with an RS485 transceiver does the job, and the
+service keeps running wherever it already runs.
+
+```yaml
+serial:
+  port: socket://192.168.1.60:8880   # the bridge, not a local device
+```
+
+Any `://` in `serial.port` switches to a network transport. Set 9600 8E1 **on
+the bridge**, because framing is applied by the bridge's own UART — there is
+nothing for this end to configure, so baud and parity probing is skipped.
+
+Firmware options, in order of least work:
+
+- **Tasmota**: `Baudrate 9600`, `SerialConfig 8E1`, `TCPStart 8880`.
+- **ESPHome** with the `stream_server` external component.
+- Twenty lines of Arduino pumping bytes between `Serial` and a `WiFiClient`.
+
+Two things to get right on an ESP8266:
+
+- **Use a 3.3 V transceiver** (MAX3485, SP3485, or an auto-direction module
+  specified for 3.3 V). ESP8266 pins are not 5 V tolerant, and a 5 V RS485
+  module will drive its receive output straight into a pin that cannot take it.
+- **It has one usable hardware UART.** UART0 is shared with the USB serial
+  console, so the bridge takes it and you lose the console; UART1 is
+  transmit-only. Tasmota and ESPHome both handle this, but do the initial
+  flashing before wiring the transceiver to those pins.
+
+The trade is reliability. A USB adapter fails only if the cable falls out; WiFi
+adds an access point, a DHCP lease and radio interference to the list. Frames
+here are delimited by length and CRC rather than by idle gaps, so TCP chunking
+is harmless — but a WiFi dropout looks to the charger like a meter that stopped
+answering, which is a fault rather than a throttle. If the charger sits within
+reach of a cable, use the cable.
 
 ## Wiring
 
