@@ -2,6 +2,9 @@
 # Copy to config.yaml and edit.
 
 serial:
+  # CH340/CH341 and FTDI adapters show up as /dev/ttyUSB0. Newer WCH chips
+  # (CH343, CH9102) are CDC-ACM class devices and show up as /dev/ttyACM0
+  # instead. Check with: dmesg | tail  after plugging it in.
   port: /dev/ttyUSB0
 
   # The N1-CT leaves the factory on 9600 baud, even parity, unit id 1, and

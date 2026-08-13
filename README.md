@@ -75,9 +75,15 @@ a short feedback loop, not a fishing expedition — see
 
 ## Hardware
 
-- A USB-RS485 adapter. Prefer one with automatic direction control (CH340,
-  CP2102 or FTDI based). If yours needs RTS keying, set
-  `serial.rts_direction_control: true`.
+- A USB-RS485 adapter with **A, B and GND** broken out — a floating ground
+  works on the bench and fails intermittently in a meter cupboard. Prefer one
+  with automatic direction control (CH340, CH343, CP2102 or FTDI based); if
+  yours needs RTS keying, set `serial.rts_direction_control: true`. Transient
+  protection (TVS, resettable fuse) is worth having on a cable that runs to a
+  charger. Status LEDs for TX and RX are worth more than they look — they tell
+  you the charger is transmitting before any software works.
+- Note the device name: CH340/FTDI appear as `/dev/ttyUSB0`, while CH343 and
+  CH9102 are CDC-ACM devices and appear as `/dev/ttyACM0`.
 - Three-core shielded cable from the box running this to the charger (the
   Wallbox guide specifies STP Cat-5e, up to 500 m).
 - Optionally a second USB-RS485 adapter, to test on the bench with
