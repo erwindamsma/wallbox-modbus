@@ -158,6 +158,11 @@ cancels in the difference. Splitting the two across separate pairs undoes that,
 and it fails as intermittent bad frames rather than as an obvious break. Spare
 conductors can be left unconnected, or doubled up on GND.
 
+Doubling conductors onto D+ and D− is only useful if each pair still carries
+one of each — `D+` on blue and orange, `D−` on blue/white and orange/white.
+Putting both halves of a pair on the same polarity gives you a thicker wire and
+no twist where it counts.
+
 If the cable has a shield, earth it at **one end only**, or it becomes a ground
 loop between two points that are not at the same potential — which matters more
 when one end is outdoors.
