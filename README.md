@@ -18,10 +18,15 @@ a plain **Modbus RTU master**:
 | | |
 |---|---|
 | Physical layer | RS485, three wires (D+, D−, GND), plus 12 V if you want the charger to power your device |
-| Serial | **9600 baud, 8 data bits, even parity, 1 stop bit** (N1-CT factory default) |
-| Slave address | **1** |
+| Serial | **19200 baud, 8 data bits, no parity, 1 stop bit** |
+| Slave address | **1** (it also scans 2, and 12) |
 | Function code | **03** (read holding registers); writes with 06 |
 | Encoding | Big-endian IEEE-754 **float32** across two registers ("ABCD") |
+
+Note the serial settings. The N1-CT manual documents 9600/even as the factory
+default and that is wrong for this bus — Wallbox reconfigures the meter it
+ships to **19200 8N1**. Trusting the manual costs you a day, because every
+capture comes back as plausible-looking garbage rather than as silence.
 
 The register map is published in the N1-CT user manual and matches a
 [real capture](https://github.com/relyd/modbussniffer) of Pulsar-Plus-to-meter
@@ -48,16 +53,47 @@ inside the charger, which is the thing that knows how much current it is drawing
 The loop closes through the fuse: your grid measurement already includes the
 charger's own draw, which is exactly what Power Boost expects.
 
-## The one unknown
+## The handshake
 
-Nobody has published a capture of the **startup handshake** — what the charger
-reads from the `0x4000` identity block, and what it accepts. The measurement
-side is documented and certain; the identity side is educated guesswork
-(`meter_code` in particular is a plain guess).
+Nobody had published a capture of the startup handshake, so this is what a
+Pulsar Plus actually does. **It only looks for a meter for about two minutes
+after booting**, then gives up until the next restart — which is why the app
+insists no meter is connected even with everything correctly wired. Reboot it
+from the myWallbox app rather than at the breaker: same effect, no switching
+transient on the bus to confuse you.
 
-This is why the emulator logs every register the charger reads, flags the ones
-it could not answer from the real N1-CT map, and logs every write. Bring-up is
-a short feedback loop, not a fishing expedition — see
+During those two minutes it cycles three probes, roughly every 0.6 s, against
+unit ids 1, 2 and 12:
+
+| Probe | Looking for |
+|---|---|
+| read 1 register at `0x000B` | Carlo Gavazzi identification code (EM340 answers 340, EM330 answers 331) |
+| read 1 register at `0x4002` | INEPRO meter code |
+| read 8 registers at `0x0000` and at `0x0008` | a Carlo Gavazzi measurement block |
+
+**`0x4002` is the gate.** Answer it with `0x0102` — INEPRO's direct-connect
+variant code — and the charger stops hunting and starts polling measurements
+within 60 ms. `0x0103`, the CT variant, is *not* accepted, despite the N1-CT
+being a CT meter. Everything else can stay zero.
+
+Once it accepts, the steady poll is about 7.5 requests per second:
+
+| Register | Count | Contents |
+|---|---|---|
+| `0x5002` | 6 | voltage, L1 / L2 / L3 |
+| `0x500C` | 6 | current, L1 / L2 / L3 |
+| `0x5014` | 6 | active power, L1 / L2 / L3 |
+| `0x6000` | 2 | total active energy |
+| `0x6018` | 2 | reverse active energy |
+
+It reads all three phases even from a meter that only has one. Answering zero
+for L2 and L3 is correct for a single-phase installation and the charger is
+happy with it.
+
+If your charger wants something different, the emulator logs every register it
+reads, flags the ones outside the N1-CT map, and logs every write — and
+`meter_code` accepts a list of candidates to try within a single detection
+window. See
 [If the charger will not accept the meter](#if-the-charger-will-not-accept-the-meter).
 
 ## Safety

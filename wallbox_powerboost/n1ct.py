@@ -103,6 +103,11 @@ def u16(value: int) -> tuple[int, ...]:
     return (int(value) & 0xFFFF,)
 
 
+def first(value):
+    """meter_code may be a list of candidates; the map needs one value."""
+    return value[0] if isinstance(value, (list, tuple)) else value
+
+
 def build_register_map(m, ident) -> dict[int, int]:
     """Render a measurement snapshot into {register: 16-bit word}."""
     regs: dict[int, int] = {}
@@ -112,7 +117,7 @@ def build_register_map(m, ident) -> dict[int, int]:
             regs[addr + offset] = word
 
     put(REG_SERIAL_NUMBER, i32(ident.serial_number))
-    put(REG_METER_CODE, u16(ident.meter_code))
+    put(REG_METER_CODE, u16(first(ident.meter_code)))
     put(REG_MODBUS_ID, u16(ident.modbus_id))
     put(REG_BAUD_RATE, u16(ident.baud_code))
     put(REG_PROTOCOL_VERSION, f32(ident.protocol_version))
@@ -166,8 +171,44 @@ class RegisterFile:
         self.unmapped: dict[int, int] = {}
         self.writes: list[tuple[int, int]] = []
 
+        # meter_code may be a list of candidates. The charger reads 0x4002 many
+        # times while hunting for a meter, so serving a different candidate each
+        # time tests all of them within a single detection window instead of one
+        # per reboot. Freeze on the first candidate that gets us as far as a
+        # measurement read -- that is the one it accepted.
+        code = identity.meter_code
+        self.meter_code_candidates = list(code) if isinstance(code, (list, tuple)) else None
+        self._code_index = 0
+        self.meter_code_accepted: int | None = None
+
+    def _serve_meter_code(self) -> int:
+        if self.meter_code_accepted is not None:
+            return self.meter_code_accepted
+        value = self.meter_code_candidates[self._code_index % len(self.meter_code_candidates)]
+        self._code_index += 1
+        log.info("serving meter code candidate 0x%04X at 0x%04X", value, REG_METER_CODE)
+        return value
+
+    def _last_meter_code(self) -> int:
+        index = (self._code_index - 1) % len(self.meter_code_candidates)
+        return self.meter_code_candidates[index]
+
     def read(self, start: int, count: int) -> list[int]:
         regs = build_register_map(self.model.snapshot(), self.identity)
+        requested = range(start, start + count)
+
+        if self.meter_code_candidates:
+            if (self.meter_code_accepted is None and self._code_index
+                    and any(0x5000 <= a <= 0x60FF for a in requested)):
+                self.meter_code_accepted = self._last_meter_code()
+                log.warning(
+                    "ACCEPTED: the charger moved on to measurements after meter code "
+                    "0x%04X -- put that in identity.meter_code",
+                    self.meter_code_accepted,
+                )
+            if REG_METER_CODE in requested:
+                regs[REG_METER_CODE] = self._serve_meter_code()
+
         out: list[int] = []
         for addr in range(start, start + count):
             self.read_counts[addr] = self.read_counts.get(addr, 0) + 1

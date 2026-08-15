@@ -7,12 +7,13 @@ serial:
   # instead. Check with: dmesg | tail  after plugging it in.
   port: /dev/ttyUSB0
 
-  # The N1-CT leaves the factory on 9600 baud, even parity, unit id 1, and
-  # that is what the charger expects. Leave these on "auto" for the first run:
-  # the emulator then listens on each plausible combination until it sees a
-  # CRC-valid frame, and logs which one worked. Pin them afterwards.
-  baud: auto        # auto, 9600, 19200
-  parity: auto      # auto, even, none, odd
+  # CONFIRMED against a Pulsar Plus: the bus runs at 19200 8N1, unit id 1.
+  # Note this contradicts the N1-CT manual, which documents 9600/even as the
+  # factory default -- Wallbox evidently reconfigures the meter it ships.
+  # If yours differs, set both to "auto" and the emulator listens on each
+  # combination until it sees a CRC-valid frame, then logs which one worked.
+  baud: 19200       # auto, 9600, 19200
+  parity: none      # auto, even, none, odd
   stopbits: 1
   unit_id: 1
   probe_seconds: 8
@@ -47,7 +48,14 @@ meter:
   # to look -- see README, "If the charger does not accept the meter".
   identity:
     serial_number: 20250001
-    meter_code: 0
+    # CONFIRMED: the charger accepts 0x0102 here and then starts polling
+    # measurements. 0x0102 is INEPRO's direct-connect variant code (0x0103 is
+    # the CT variant, which it does NOT accept). Getting this wrong is the
+    # difference between "no meter connected" and a working Power Boost.
+    # A list of candidates may be given instead, e.g. [0x0102, 0x0103]: the
+    # emulator serves a different one each time the charger reads 0x4002 and
+    # freezes on whichever gets it as far as reading measurements.
+    meter_code: 0x0102
     modbus_id: 1
     baud_code: 9600
     protocol_version: 1.0

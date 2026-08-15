@@ -38,6 +38,7 @@ def parse_args(argv=None):
     p.add_argument("--log-level", help="override log_level from the config")
     p.add_argument("--port",
                    help="override serial.port, e.g. a virtual link from tools/vlink.py")
+    p.add_argument("--baud", help="override serial.baud, e.g. 9600, or auto")
     p.add_argument("--parity", choices=["even", "none", "odd", "auto"],
                    help="override serial.parity; use none over a virtual link, which "
                         "has no UART and cannot emulate parity")
@@ -218,6 +219,8 @@ def main(argv=None) -> int:
         cfg = config_mod.load(args.config, require_source_entities=not args.list_entities)
         if args.port:
             cfg.serial.port = args.port
+        if args.baud:
+            cfg.serial.baud = args.baud if args.baud == "auto" else int(args.baud)
         if args.parity:
             cfg.serial.parity = config_mod.PARITY_ALIASES.get(args.parity, args.parity)
     except FileNotFoundError:

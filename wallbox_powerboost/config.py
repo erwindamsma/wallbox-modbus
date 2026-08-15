@@ -30,7 +30,9 @@ class SerialConfig:
 @dataclass
 class IdentityConfig:
     serial_number: int = 20250001
-    meter_code: int = 0
+    # An int, or a list of candidates to cycle through while the charger hunts.
+    # 0x0103 is the INEPRO code for a CT-connected meter, which is what an N1-CT is.
+    meter_code: object = 0x0103
     modbus_id: int = 1
     baud_code: int = 9600
     protocol_version: float = 1.0

@@ -197,6 +197,9 @@ class ModbusRtuSlave(threading.Thread):
                     return
                 chunk = ser.read(256)
                 if chunk:
+                    # Raw capture: when the framing settings are wrong, the bytes
+                    # themselves are the only evidence of what is really out there.
+                    log.debug("raw rx %2d: %s", len(chunk), chunk.hex(" "))
                     buf += chunk
                     self._consume(ser, buf, baud, parity)
                     if len(buf) > 512:
