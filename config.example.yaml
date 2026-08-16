@@ -77,7 +77,10 @@ source:
   type: homeassistant
 
   url: http://homeassistant.local:8123
-  # Profile -> Security -> Long-lived access tokens. Keep this file private.
+  # Profile -> Security -> Long-lived access tokens. Keep this file private: the
+  # token grants full API access and lasts ten years. Over plain http it also
+  # crosses your LAN in the clear on every reconnect, so use https if your Home
+  # Assistant has a certificate.
   token: "PASTE_A_LONG_LIVED_ACCESS_TOKEN_HERE"
 
   mode: push          # push = WebSocket, poll = REST

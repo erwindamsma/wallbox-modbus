@@ -13,6 +13,11 @@ tail of a `--log-level DEBUG` run is what I need, especially the
 on that isn't in the N1-CT manual means it thinks it's talking to a different
 meter, and that's the most useful thing anyone can tell me.
 
+**Scrub it before you paste.** At INFO level the log prints your Home Assistant
+address and your entity names, and `--list-entities` prints the lot. None of
+that helps me: the lines I need are the Modbus ones, and those say nothing about
+your house.
+
 Serial settings found by `baud: auto` / `parity: auto` are worth reporting even
 when everything works. The 19200 8N1 in the example config comes from exactly
 one charger and contradicts the meter's own manual.
