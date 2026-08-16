@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 import yaml
 
 from . import sources
+
+log = logging.getLogger(__name__)
 
 PARITY_ALIASES = {
     "e": "E", "even": "E",
@@ -204,8 +207,23 @@ def _validate(cfg: Config, require_source_entities: bool = True) -> None:
     lim = cfg.limits
     if lim.installation_current_a <= 0:
         raise ValueError("limits.installation_current_a must be positive")
+    # This is the window in which the charger may be drawing its maximum on a
+    # reading nobody can vouch for, so it gets an upper bound rather than just
+    # a warning in the README.
     if cfg.failsafe.max_data_age_s <= 0:
         raise ValueError("failsafe.max_data_age_s must be positive")
+    if cfg.failsafe.max_data_age_s > 300:
+        raise ValueError(
+            f"failsafe.max_data_age_s is {cfg.failsafe.max_data_age_s:.0f}s. Above 300 the "
+            "failsafe stops being one: the charger would sit at its maximum for minutes on "
+            "a reading that may be long dead. Fix the data source instead"
+        )
+    if cfg.failsafe.max_data_age_s > 60:
+        log.warning(
+            "failsafe.max_data_age_s is %.0fs. That is how long the charger may draw its "
+            "maximum on a stale reading before this backs it off; 15s is the default",
+            cfg.failsafe.max_data_age_s,
+        )
     if cfg.failsafe.current_a <= 0:
         raise ValueError("failsafe.current_a must be positive")
     if cfg.failsafe.current_a <= lim.installation_current_a:

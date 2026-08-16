@@ -1,0 +1,8 @@
+# The install path is a git clone, but an sdist should still carry the things
+# you need to actually run this: the example config, the bench tools, and the
+# unit and udev files the README tells you to copy.
+include config.example.yaml
+include CONTRIBUTING.md
+recursive-include tools *.py
+recursive-include systemd *.service
+recursive-include udev *.rules

@@ -51,6 +51,7 @@ class HomeAssistantSource(EnergySource):
         self._states: dict[str, float | None] = {}
         self._units: dict[str, str | None] = {}
         self._push_failures = 0
+        self._backoff = 1.0
 
         self.entities = [
             e for e in (cfg.power_entity, cfg.import_entity, cfg.export_entity, cfg.voltage_entity)
@@ -86,7 +87,9 @@ class HomeAssistantSource(EnergySource):
         return {"Authorization": f"Bearer {self.cfg.token}"}
 
     async def run(self) -> None:
-        backoff = 1.0
+        # self._backoff, not a local: neither _run_push nor _run_poll ever
+        # returns normally, so a reset placed after them here is dead code and
+        # the delay only ever grows. They reset it themselves once connected.
         async with aiohttp.ClientSession(headers=self._headers) as session:
             while True:
                 try:
@@ -95,7 +98,6 @@ class HomeAssistantSource(EnergySource):
                         await self._run_push(session)
                     else:
                         await self._run_poll(session)
-                    backoff = 1.0
                 except asyncio.CancelledError:
                     raise
                 except (aiohttp.ClientConnectorError, OSError) as exc:
@@ -104,8 +106,7 @@ class HomeAssistantSource(EnergySource):
                     # WebSocket transport.
                     self.connected = False
                     log.warning("cannot reach Home Assistant at %s: %s", self.base, exc)
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 30.0)
+                    await self._sleep_backoff()
                 except Exception as exc:
                     self.connected = False
                     log.warning("Home Assistant connection problem: %s", exc)
@@ -116,8 +117,11 @@ class HomeAssistantSource(EnergySource):
                                 "the WebSocket API keeps failing, falling back to REST polling"
                             )
                             self.mode = "poll"
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, 30.0)
+                    await self._sleep_backoff()
+
+    async def _sleep_backoff(self) -> None:
+        await asyncio.sleep(self._backoff)
+        self._backoff = min(self._backoff * 2, 30.0)
 
     # -- transports --------------------------------------------------------
 
@@ -154,6 +158,7 @@ class HomeAssistantSource(EnergySource):
 
             self.connected = True
             self._push_failures = 0
+            self._backoff = 1.0  # we are up; the next blip retries promptly
             log.info("subscribed to %s via the Home Assistant WebSocket API",
                      ", ".join(self.entities))
 
@@ -166,6 +171,7 @@ class HomeAssistantSource(EnergySource):
 
     async def _run_poll(self, session: aiohttp.ClientSession) -> None:
         self.connected = True
+        self._backoff = 1.0
         log.info("polling %s every %.1fs", ", ".join(self.entities), self.cfg.poll_interval_s)
         while True:
             await self._bootstrap(session)

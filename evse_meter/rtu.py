@@ -114,33 +114,55 @@ class ModbusRtuSlave(threading.Thread):
         self.bad_frames = 0
         self.last_request_at: float | None = None
 
+        self._candidates = self._build_candidates()
+        if len(self._candidates) == 1:
+            self.locked = self._candidates[0]
+
+    def _build_candidates(self) -> list[tuple[int, str]]:
+        """Settings to try, narrowed by whatever the config pins down.
+
+        Read from self.cfg every time rather than cached, because a charger can
+        write a new baud rate or parity to 0x4004 / 0x4011 mid-session.
+        """
+        cfg = self.cfg
         fixed_baud = cfg.baud if isinstance(cfg.baud, int) else None
         fixed_parity = cfg.parity if cfg.parity in PARITY_NAMES else None
         if fixed_baud and fixed_parity:
-            self._candidates = [(fixed_baud, fixed_parity)]
-            self.locked = (fixed_baud, fixed_parity)
+            candidates = [(fixed_baud, fixed_parity)]
         elif fixed_baud:
-            self._candidates = [(fixed_baud, p) for _, p in PROBE_CANDIDATES]
+            candidates = [(fixed_baud, p) for _, p in PROBE_CANDIDATES]
         elif fixed_parity:
-            self._candidates = [(b, fixed_parity) for b, _ in PROBE_CANDIDATES]
+            candidates = [(b, fixed_parity) for b, _ in PROBE_CANDIDATES]
         else:
-            self._candidates = list(PROBE_CANDIDATES)
+            candidates = list(PROBE_CANDIDATES)
         # De-duplicate while keeping order.
         seen: set[tuple[int, str]] = set()
-        self._candidates = [c for c in self._candidates if not (c in seen or seen.add(c))]
+        return [c for c in candidates if not (c in seen or seen.add(c))]
 
     def stop(self) -> None:
         self._stopping.set()
 
     def request_reopen(self) -> None:
-        """Ask the serial port to be re-opened (after a comm-parameter write)."""
+        """Reopen the port, picking up a comm-parameter write.
+
+        The candidate list has to be rebuilt here: the charger has just told us
+        to speak at a different baud or parity, and reopening on the old ones
+        would leave us deaf while the log claimed we had applied the change.
+        Whatever we were locked to no longer means anything either.
+        """
+        self._candidates = self._build_candidates()
+        self.locked = self._candidates[0] if len(self._candidates) == 1 else None
         self._reopen.set()
 
     # -- main loop ---------------------------------------------------------
 
     def run(self) -> None:
         while not self._stopping.is_set():
-            for baud, parity in self._candidates:
+            # Once locked, only ever reopen on the setting that worked. Walking
+            # the probe list again would land on its first entry, and _serve
+            # sets no probe deadline while locked, so it would sit there on the
+            # wrong baud for good instead of moving on.
+            for baud, parity in ([self.locked] if self.locked else self._candidates):
                 if self._stopping.is_set():
                     return
                 try:

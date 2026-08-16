@@ -28,7 +28,7 @@ The Power Boost accessory is an off-the-shelf
 [INEPRO N1-CT](https://www.ineprometering.com/product/n1-ct-electricity-meter),
 and the charger polls it as a plain Modbus RTU master:
 
-| | |
+| Layer | |
 |---|---|
 | Wiring | RS485: D+, D−, GND |
 | Serial | **19200 8N1** |
@@ -89,9 +89,8 @@ fine.
 A USB-**RS485** adapter with **A, B and GND** broken out. Not a USB-TTL
 programmer, they look alike and TTL levels on A/B can damage things. Automatic
 direction control (CH340, CH343, CP2102, FTDI) saves you fiddling with RTS.
-CH340 and FTDI
-show up as `/dev/ttyUSB0`; CH343 and CH9102 are CDC-ACM and show up as
-`/dev/ttyACM0`. TX/RX LEDs are worth it, they tell you the charger is
+CH340 and FTDI show up as `/dev/ttyUSB0`; CH343 and CH9102 are CDC-ACM and show
+up as `/dev/ttyACM0`. TX/RX LEDs are worth it, they tell you the charger is
 transmitting before any software works.
 
 Behind the front cover there's a four-pin block:
@@ -279,7 +278,7 @@ across restarts like a real meter's would.
 From the N1 CT manual V1.17 section 9. Two registers each, big-endian float32
 unless noted. `--dump-map` prints it with live values.
 
-| | | |
+| Register | Contents | Type |
 |---|---|---|
 | `0x4000` | Serial number | int32 |
 | `0x4002` | Meter code | int16 |
@@ -309,7 +308,7 @@ pulling 3450 kW.
 
 ## Layout
 
-| | |
+| File | |
 |---|---|
 | [rtu.py](evse_meter/rtu.py) | Modbus RTU slave: framing, CRC, resync, baud/parity probing |
 | [n1ct.py](evse_meter/n1ct.py) | Register map, and logging what the charger asks for |
@@ -344,7 +343,7 @@ Any of these may suit you better, and two of them are supported products:
 
 - [INEPRO N1-CT manual](https://www.ineprometering.com/product/n1-ct-electricity-meter) — register map in section 9
 - [Wallbox EMS installation guide](https://support.wallbox.com/wp-content/uploads/ht_kb/2024/09/EN_EMS_Installation-Guide.pdf) — wiring, terminals, rotary switch, meter compatibility
-- [relyd/modbussniffer](https://github.com/relyd/modbussniffer) — a real capture of Pulsar Plus ↔ N1-CT traffic
+- [relyd/modbussniffer](https://github.com/relyd/modbussniffer) — a real capture of Pulsar Plus ↔ N1-CT traffic. Cited, not reused: that repo carries no licence, so nothing here is copied from it
 - [Inepro register reference](https://www.aggsoft.com/modbus-data-logging/inepro-metering.htm)
 
 ## Licence
