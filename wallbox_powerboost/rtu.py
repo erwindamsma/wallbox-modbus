@@ -103,7 +103,10 @@ class ModbusRtuSlave(threading.Thread):
         self.cfg = cfg
         self.regfile = regfile
         self.passive = passive
-        self._stop = threading.Event()
+        # Not _stop: threading.Thread has a private _stop() that join() calls
+        # on its way out, and shadowing it with an Event makes join() raise
+        # "'Event' object is not callable" on 3.10 through 3.12.
+        self._stopping = threading.Event()
         self._reopen = threading.Event()
 
         self.locked: tuple[int, str] | None = None
@@ -127,7 +130,7 @@ class ModbusRtuSlave(threading.Thread):
         self._candidates = [c for c in self._candidates if not (c in seen or seen.add(c))]
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stopping.set()
 
     def request_reopen(self) -> None:
         """Ask the serial port to be re-opened (after a comm-parameter write)."""
@@ -136,9 +139,9 @@ class ModbusRtuSlave(threading.Thread):
     # -- main loop ---------------------------------------------------------
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stopping.is_set():
             for baud, parity in self._candidates:
-                if self._stop.is_set():
+                if self._stopping.is_set():
                     return
                 try:
                     self._serve(baud, parity)
@@ -190,7 +193,7 @@ class ModbusRtuSlave(threading.Thread):
         probe_deadline = None if self.locked else time.monotonic() + self.cfg.probe_seconds
         buf = bytearray()
         try:
-            while not self._stop.is_set():
+            while not self._stopping.is_set():
                 if self._reopen.is_set():
                     self._reopen.clear()
                     log.info("re-opening serial port with new communication settings")

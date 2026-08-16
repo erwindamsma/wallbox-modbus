@@ -260,8 +260,18 @@ def main() -> int:
     acc.update(power_w=-3600.0)
     check("export accumulates into reverse energy", acc.snapshot().reverse_energy_kwh > 0)
 
+    print("\nshutdown")
+    # Regression: the slave thread once held its stop flag in self._stop, which
+    # shadows a private threading.Thread method that join() calls, so this line
+    # raised "'Event' object is not callable" on 3.10 through 3.12. Assert it
+    # rather than let a traceback escape and lose every result above.
     slave.stop()
-    slave.join(timeout=2.0)
+    try:
+        slave.join(timeout=2.0)
+        check("the slave thread joins cleanly", not slave.is_alive())
+    except Exception as exc:
+        check("the slave thread joins cleanly", False, f"{type(exc).__name__}: {exc}")
+
     os.close(master_fd)
     os.close(slave_fd)
 
