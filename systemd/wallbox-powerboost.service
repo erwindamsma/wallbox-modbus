@@ -1,6 +1,6 @@
 [Unit]
 Description=Wallbox Power Boost meter emulator (INEPRO N1-CT over Modbus RTU)
-Documentation=https://github.com/local/wallbox-modbus
+Documentation=https://github.com/erwindamsma/wallbox-modbus
 After=network-online.target
 Wants=network-online.target
 

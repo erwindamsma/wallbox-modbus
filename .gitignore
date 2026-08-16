@@ -1,5 +1,10 @@
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
+build/
+dist/
+
+# Your own config: it holds an access token and your address. Never commit it.
 config.yaml
 energy.json
