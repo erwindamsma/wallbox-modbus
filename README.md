@@ -1,205 +1,125 @@
-# wallbox-modbus — a Power Boost meter, without the Power Boost
+# wallbox-modbus
 
-Makes a Wallbox charger believe an **INEPRO N1-CT** energy meter is wired to its
-RS485 port, so it will run **Power Boost** (dynamic load management) and
-**Eco-Smart** (solar charging) using live data you already have — from Home
-Assistant, or from anything else you care to plug in — instead of from the €200
-accessory.
+My Wallbox Pulsar Plus will only do Power Boost (dynamic load management) if it
+sees an INEPRO N1-CT energy meter on its RS485 port. This program pretends to be
+that meter, fed with live grid power from Home Assistant.
 
-You supply one number, continuously: the power flowing through your grid
-connection. The charger does the rest, in its own firmware, where the load
-balancing belongs.
+I didn't want to buy the accessory, and the meter turned out to be a stock
+Modbus device, so this was mostly a weekend of staring at a serial port.
 
 ## Status
 
-Reverse-engineered from one charger. The protocol findings below are measured,
-not guessed, but they come from a sample of one — which is exactly why
-[reports from other hardware](CONTRIBUTING.md) are the most useful thing you can
-send.
+Everything here comes from one charger, mine.
+
+- **Works.** Pulsar Plus, single phase, Home Assistant. I've watched it throttle
+  the charge when the house load goes up.
+- **Untested.** Eco-Smart (solar). See [Solar](#solar).
+- **Refuses to run.** Three-phase supplies. See [Three-phase](#three-phase).
+- **Needs.** Linux, Python 3.10+, a USB-RS485 adapter, and access to the
+  charger's terminal block.
+
+Other Wallbox models (Copper SB, Commander 2, Quasar) use the same EMS docs and
+will probably work, but nobody has tried. If you do,
+[tell me what happened](CONTRIBUTING.md).
+
+## How it works
+
+The Power Boost accessory is an off-the-shelf
+[INEPRO N1-CT](https://www.ineprometering.com/product/n1-ct-electricity-meter),
+and the charger polls it as a plain Modbus RTU master:
 
 | | |
 |---|---|
-| **Confirmed working** | Pulsar Plus, single-phase supply, Home Assistant as the data source |
-| **Expected to work, unreported** | Copper SB, Commander 2, Quasar — same EMS documentation, same meter compatibility table |
-| **Not supported** | Three-phase installations. The program refuses to start rather than half-protect one — [see below](#three-phase-installations) |
-| **Requires** | Linux, Python 3.10+, a USB-RS485 adapter, and physical access to the charger's terminal block |
+| Wiring | RS485: D+, D−, GND |
+| Serial | **19200 8N1** |
+| Slave id | 1 (it also scans 2 and 12) |
+| Function | 03 to read, 06 to write |
+| Encoding | big-endian float32 over two registers |
 
-## Why this works
+The N1-CT manual says 9600 8E1. That's wrong for this bus, Wallbox reconfigures
+the meter it ships. I lost a day to that, because at 9600 the frames still
+decode far enough to look like a parity problem. Set `baud: auto` and
+`parity: auto` if you want the emulator to find it for you.
 
-The EU Power Boost accessory is not a proprietary black box. It is an
-[INEPRO Metering N1-CT](https://www.ineprometering.com/product/n1-ct-electricity-meter)
-— an off-the-shelf single-phase DIN-rail meter — and the charger talks to it as
-a plain **Modbus RTU master**:
-
-| | |
-|---|---|
-| Physical layer | RS485, three wires (D+, D−, GND), plus 12 V if you want the charger to power your device |
-| Serial | **19200 baud, 8 data bits, no parity, 1 stop bit** |
-| Slave address | **1** (it also scans 2, and 12) |
-| Function code | **03** (read holding registers); writes with 06 |
-| Encoding | Big-endian IEEE-754 **float32** across two registers ("ABCD") |
-
-Note the serial settings. The N1-CT manual documents 9600/even as the factory
-default and that is wrong for this bus — Wallbox reconfigures the meter it
-ships to **19200 8N1**. Trusting the manual costs you a day, because every
-capture comes back as plausible-looking garbage rather than as silence. If your
-charger disagrees, set `baud` and `parity` to `auto` and it will tell you what
-it is actually using.
-
-The register map is published in the N1-CT user manual and matches a
-[real capture](https://github.com/relyd/modbussniffer) of Pulsar-Plus-to-meter
-traffic (`01 03 50 0A 00 02` → `01 03 04 3F A1 68 73` = 1.25 A). Everything the
-charger needs is in three blocks — identity at `0x4000`, measurements at
-`0x5000`, energy at `0x6000`.
-
-So: read the house load, present it on those registers, and the charger does the
-rest. The load-balancing logic stays where it belongs — inside the charger,
-which is the thing that knows how much current it is drawing.
-
-```
-  ┌──────────────┐   WebSocket   ┌──────────────┐   Modbus RTU    ┌─────────────┐
-  │ energy       │──────────────▶│ this program │────────────────▶│   Wallbox   │
-  │ source       │  grid power   │  (Linux box) │  RS485 @19200   │   charger   │
-  └──────────────┘               └──────────────┘                 └─────────────┘
-         ▲                                                               │
-         │ P1 / smart meter                                              │ throttles
-  ┌──────┴───────────────────────────────────────────────────────────────▼──────┐
-  │                             main fuse                                       │
-  └─────────────────────────────────────────────────────────────────────────────┘
-```
-
-The loop closes through the fuse: your grid measurement already includes the
-charger's own draw, which is exactly what Power Boost expects.
+So: read the house load, put it on the registers the charger asks for, and the
+charger does its own balancing. That's the right place for it, since the charger
+is the only thing that knows how much it's drawing.
 
 ## The handshake
 
-Nobody had published a capture of the startup handshake, so this is what a
-Pulsar Plus actually does. **It only looks for a meter for about two minutes
-after booting**, then gives up until the next restart — which is why the app
-insists no meter is connected even with everything correctly wired. Start this
-program *before* the charger. Reboot the charger from the myWallbox app rather
-than at the breaker: same effect, no switching transient on the bus to confuse
-you.
+I couldn't find this documented anywhere, so here's what a Pulsar Plus does.
+
+**It only looks for a meter for about two minutes after it boots**, then gives
+up until the next restart. This is why the app keeps saying no meter is
+connected while your wiring is perfectly fine. Start this program first, then
+reboot the charger from the app.
 
 During those two minutes it cycles three probes, roughly every 0.6 s, against
 unit ids 1, 2 and 12:
 
 | Probe | Looking for |
 |---|---|
-| read 1 register at `0x000B` | Carlo Gavazzi identification code (EM340 answers 340, EM330 answers 331) |
-| read 1 register at `0x4002` | INEPRO meter code |
-| read 8 registers at `0x0000` and at `0x0008` | a Carlo Gavazzi measurement block |
+| 1 register at `0x000B` | Carlo Gavazzi id code (EM340 answers 340) |
+| 1 register at `0x4002` | INEPRO meter code |
+| 8 registers at `0x0000` and `0x0008` | Carlo Gavazzi measurement block |
 
-**`0x4002` is the gate.** Answer it with `0x0102` — INEPRO's direct-connect
-variant code — and the charger stops hunting and starts polling measurements
-within 60 ms. `0x0103`, the CT variant, is *not* accepted, despite the N1-CT
-being a CT meter. Everything else can stay zero.
+**`0x4002` is the gate.** Answer `0x0102` and it starts polling measurements
+60 ms later. `0x0103` is rejected, even though that's the CT variant code and an
+N1-CT is a CT meter. Everything else can stay zero.
 
-Once it accepts, the steady poll is about 7.5 requests per second:
-
-| Register | Count | Contents |
-|---|---|---|
-| `0x5002` | 6 | voltage, L1 / L2 / L3 |
-| `0x500C` | 6 | current, L1 / L2 / L3 |
-| `0x5014` | 6 | active power, L1 / L2 / L3 |
-| `0x6000` | 2 | total active energy |
-| `0x6018` | 2 | reverse active energy |
-
-It reads all three phases even from a meter that only has one. Answering zero
-for L2 and L3 is correct for a single-phase installation and the charger is
-happy with it — and is the reason a three-phase installation cannot use this.
-
-If your charger wants something different, the emulator logs every register it
-reads, flags the ones outside the N1-CT map, and logs every write — and
-`meter_code` accepts a list of candidates to try within a single detection
-window. See
-[If the charger will not accept the meter](#if-the-charger-will-not-accept-the-meter).
+After that it settles into about 7.5 requests/second: voltage at `0x5002`,
+current at `0x500C`, power at `0x5014`, energy at `0x6000` and `0x6018`. It
+reads all three phases even from a single-phase meter. Zeros for L2 and L3 are
+fine.
 
 ## Safety
 
-- **Isolate the charger** at the breaker before opening it. The RS485 terminals
-  themselves are extra-low voltage, but you are working inside a unit that is
-  otherwise on 230 V. If that sentence gives you pause, this is a job for an
-  electrician.
-- Opening the charger may affect your warranty. The wiring is exactly what a
-  real Power Boost installation requires, but it is your call.
-- **This protects a fuse.** Read [Failsafe](#failsafe) before leaving it
-  unattended. If the emulator lies about the house load, the charger will
-  cheerfully pull its maximum on top of whatever else is running.
-- Set the charger's own limit conservatively at first (16 A), confirm the
-  throttling actually happens, and only then raise it.
-- Nothing here is certified as a load-management device, and the MIT licence
-  means exactly what it says about warranty. The charger's internal rotary
-  switch is the only limit that survives this program crashing — set it as if
-  this program did not exist.
+- Kill the breaker before you open the charger. The RS485 terminals are low
+  voltage but the rest of the box isn't.
+- Opening it may void your warranty. Your call.
+- **This thing guards a fuse.** If it lies about the house load, the charger
+  will happily pull its maximum on top of everything else. Read
+  [Failsafe](#failsafe).
+- Set the charger's rotary switch low (16 A) until you've seen it throttle.
+- It's not a certified load-management device and the MIT licence means what it
+  says. The rotary switch is the only limit that survives this crashing.
 
-## Hardware
+## Hardware and wiring
 
-- A USB-RS485 adapter with **A, B and GND** broken out — a floating ground
-  works on the bench and fails intermittently in a meter cupboard. Prefer one
-  with automatic direction control (CH340, CH343, CP2102 or FTDI based); if
-  yours needs RTS keying, set `serial.rts_direction_control: true`. Transient
-  protection (TVS, resettable fuse) is worth having on a cable that runs to a
-  charger. Status LEDs for TX and RX are worth more than they look — they tell
-  you the charger is transmitting before any software works.
-- Note the device name: CH340/FTDI appear as `/dev/ttyUSB0`, while CH343 and
-  CH9102 are CDC-ACM devices and appear as `/dev/ttyACM0`.
-- Three-core shielded cable from the box running this to the charger (the
-  Wallbox guide specifies STP Cat-5e, up to 500 m). If the charger is outdoors
-  and your Linux box is not, run the cable rather than putting a microcontroller
-  in the weather.
-- Optionally a second USB-RS485 adapter, to test on the bench with
-  [tools/test_master.py](tools/test_master.py) before touching the charger.
+A USB-RS485 adapter with **A, B and GND** broken out. Automatic direction
+control (CH340, CH343, CP2102, FTDI) saves you fiddling with RTS. CH340 and FTDI
+show up as `/dev/ttyUSB0`; CH343 and CH9102 are CDC-ACM and show up as
+`/dev/ttyACM0`. TX/RX LEDs are worth it, they tell you the charger is
+transmitting before any software works.
 
-## Wiring
+Behind the front cover there's a four-pin block:
 
-The charger has a four-pin terminal block behind the front cover, labelled
-`12V  GND  D+  D-`. A real N1-CT connects like this — your adapter takes the
-meter's place:
-
-| Charger | N1-CT terminal | Your USB-RS485 adapter |
+| Charger | N1-CT | Your adapter |
 |---|---|---|
 | `D+` | 20 (A) | A / D+ |
 | `D-` | 21 (B) | B / D− |
-| `GND` | 24 (GND) | GND |
-| `12V` | 23 (12V) | *leave unconnected* — power your box from its own supply |
+| `GND` | 24 | GND |
+| `12V` | 23 | leave it, power your box separately |
 
-**GND must be connected.** RS485 is differential but not ground-referenced;
-skipping it works on the bench and fails intermittently in a meter cupboard.
+**Connect GND.** RS485 is differential but not ground-referenced. Skipping it
+works on the bench and fails in a meter cupboard.
 
-If you are running this over spare pairs in a Cat-5 cable, put D+ and D− on the
-two conductors of *one* twisted pair — that is what makes the differential
-signalling work — and use a second pair, both conductors together, for ground.
+Running it over spare pairs in Cat-5? Put D+ and D− on the two wires of *one*
+twisted pair. That twist is the whole noise-rejection mechanism. Use a second
+pair, both wires together, for ground.
 
-Wallbox's own P1-port module is wired the same way and takes its power from the
-P1 port rather than the charger, so leaving `12V` unused is a supported layout,
-not a hack.
+Also set the **RS485 switch to `T`** (you're the only slave, so terminate), and
+the **rotary switch** to your maximum charging current
+(`1=6A 2=10A 3=13A 4=16A 5=20A 6=25A 7=32A`).
 
-Inside the charger, also set:
-
-- the **RS485 switch to position `T`** (bus termination — you are the only
-  slave, so termination belongs at both ends);
-- the **rotary switch to the maximum charging current**. Positions map to
-  `1=6A  2=10A  3=13A  4=16A  5=20A  6=25A  7=32A`. Start at **position 4
-  (16 A)** — see [Capping the charger](#capping-the-charger).
-
-## Serial port setup
-
-Plug the adapter in and find it with `dmesg | tail`. Then install the udev
-rules, which do two things worth having:
+Then install the udev rules. They drop the FTDI latency timer from 16 ms to 1 ms,
+which otherwise lands right on the Modbus turnaround, and give you a stable
+device name so a second adapter can't steal `/dev/ttyUSB0`:
 
 ```bash
 sudo cp udev/99-wallbox-rs485.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 ```
-
-- **FTDI latency.** FTDI chips hold received bytes for up to 16 ms before
-  passing them to userspace, which lands directly on our Modbus response
-  turnaround. The rule drops it to 1 ms.
-- **A stable device name.** `/dev/ttyUSB0` is a race: plug in a second adapter,
-  or reboot with another USB serial device present, and the service may open
-  the wrong one. Uncomment the `SYMLINK` line with your adapter's serial
-  number and point `serial.port` at `/dev/wallbox-rs485`.
 
 ## Install
 
@@ -208,330 +128,222 @@ git clone https://github.com/erwindamsma/wallbox-modbus /opt/wallbox-modbus
 cd /opt/wallbox-modbus
 python3 -m venv .venv
 ./.venv/bin/pip install .
-
 cp config.example.yaml config.yaml
-$EDITOR config.yaml
 ```
 
-That puts a `wallbox-powerboost` command in the venv; `python -m
-wallbox_powerboost` works identically and is what the examples below use.
+Three settings have no sensible default:
 
-Three settings have no safe default and the program will tell you so:
+- `limits.installation_current_a` — your main fuse rating. Required. Set the
+  same number under Load Management in the app.
+- `source.token` — a Home Assistant long-lived token (profile → Security).
+- `source.power_entity` — the sensor with net grid power, positive when
+  importing. `--list-entities` will find it.
 
-| Setting | |
-|---|---|
-| `limits.installation_current_a` | **Required.** The rating of the fuse or main breaker the charger shares with the house. Set the same number as "maximum current per phase" in the myWallbox app. |
-| `source.token` | A Home Assistant long-lived access token: profile → Security. |
-| `source.power_entity` | The entity holding net grid power — positive importing, negative exporting. `--list-entities` finds it for you. |
-
-If your integration gives separate import and export sensors instead, set
-`import_entity` and `export_entity` and the emulator subtracts them.
 `failsafe.current_a` is derived from your fuse rating unless you set it.
 
-Once it works, install the service:
+As a service:
 
 ```bash
 sudo useradd -r -G dialout wallbox
-sudo install -D -m 640 -o wallbox config.yaml /etc/wallbox-powerboost/config.yaml
-sudo cp systemd/wallbox-powerboost.service /etc/systemd/system/
-sudo systemctl enable --now wallbox-powerboost
-journalctl -fu wallbox-powerboost
+sudo install -D -m 640 -o wallbox config.yaml /etc/evse-meter/config.yaml
+sudo cp systemd/evse-meter.service /etc/systemd/system/
+sudo systemctl enable --now evse-meter
 ```
 
-`config.yaml` holds an access token to your home automation. It is gitignored
-here, and the unit installs it `0640` — keep it that way.
+`config.yaml` has a token in it. It's gitignored and the unit installs it 0640.
 
 ## Bring-up
 
-Work through this in order — each step fails in a way that tells you something.
+Do these in order, each one fails differently.
 
-**1. Test the logic — no hardware needed.**
+**1. Test the logic.** `python tools/selftest.py` — pty pair, no hardware.
 
-```bash
-python tools/selftest.py
-```
+**2. Test the data.** `--list-entities` to find your sensor, then
+`--check-source` to watch it live without touching the serial port. **Switch on
+a kettle. The number must go up.** If it goes down your sensor is inverted, and
+Power Boost would speed up exactly when it should back off.
 
-Drives the real Modbus slave over a pty pair and checks framing, CRC,
-resynchronisation, the register map, writes, the failsafe and config
-validation.
-
-**2. Test your data source — no hardware needed.** Fill in `url` and `token` in
-`config.yaml`, then find the sensor to use:
+**3. Test the stack.** Three terminals, no hardware:
 
 ```bash
-./.venv/bin/python -m wallbox_powerboost -c config.yaml --list-entities
-```
-
-This lists every power sensor the source knows about, ones whose name looks
-grid-related first, with their current values. Put the right one in
-`source.power_entity` and check it:
-
-```bash
-./.venv/bin/python -m wallbox_powerboost -c config.yaml --check-source
-```
-
-Connects and prints what the meter would report, without touching the serial
-port. This catches the mistakes that are painful to debug later: a wrong entity
-id, a sensor in kW when you assumed W, and above all the **sign convention**.
-Switch on a kettle — the number must jump *up*. If it drops, your sensor is
-inverted and Power Boost would speed up exactly when it should back off.
-
-**3. Test the whole stack — still no hardware.** In three terminals:
-
-```bash
-./.venv/bin/python tools/vlink.py     # links /tmp/wallbox-a <-> /tmp/wallbox-b
-./.venv/bin/python -m wallbox_powerboost -c config.yaml --port /tmp/wallbox-a --parity none
+./.venv/bin/python tools/vlink.py
+./.venv/bin/python -m evse_meter -c config.yaml --port /tmp/wallbox-a --parity none
 ./.venv/bin/python tools/test_master.py /tmp/wallbox-b --parity N
 ```
 
-`--port` and `--parity` override the config, so the same `config.yaml` you will
-run for real works here without edits.
+Use `parity none` here. A pty has no UART and can't emulate parity.
 
-`test_master.py` reads the identity block and then polls the same registers the
-charger does, printing decoded values. If the current it reports tracks your
-real house load, everything except the wiring is finished. Use `parity: none`
-on both sides here — a pseudo-terminal has no UART and does not emulate parity.
+**4. Test the wiring** with a second adapter over real RS485, A–A, B–B, GND–GND.
 
-**4. Test the wiring.** Same as above but over real RS485, with a second
-USB-RS485 adapter wired A–A, B–B, GND–GND, and the real parity restored. This is
-the first step that can tell you anything about cabling and termination.
+**5. Listen first.** Wire it to the charger, enable Power Boost in the app, run
+with `--passive --log-level DEBUG`. It decodes but never transmits, so you can
+see what the charger asks for. Leave baud and parity on `auto` and it'll log
+what it locked onto.
 
-**5. Listen to the charger before answering it.** Wire it up, enable Power Boost
-in the app, and run:
+*Seeing nothing at all? Swap D+ and D−. It's always that.*
 
-```bash
-./.venv/bin/python -m wallbox_powerboost -c config.yaml --passive --log-level DEBUG
-```
+**6. Answer it.** Drop `--passive`, reboot the charger from the app. Success is
+a burst of `0x4000` reads followed by steady polling of `0x500A` and `0x5012`.
 
-Passive mode decodes traffic but never transmits. You will see the charger's
-requests and, importantly, its retry pattern. This is also how you confirm the
-serial settings: leave `baud` and `parity` on `auto` and the emulator probes
-each combination until CRC-valid frames appear, then logs
-`LOCKED: valid Modbus traffic at 19200 8N1`. Pin those values in the config
-afterwards.
+**7. Prove it throttles.** Start a charge, confirm it sits at 16 A, then switch
+on an oven. The charge current should drop within seconds. That's the whole
+point, and until you've seen it you don't have load management.
 
-If you see nothing at all: swap D+ and D−. It is the usual answer.
+## When the charger won't accept the meter
 
-**6. Answer it.** Drop `--passive`, and restart the charger from the app so it
-starts hunting again. Success looks like a short burst of reads in the `0x4000`
-range followed by **steady polling of `0x500A` and `0x5012`** about once a
-second. That steady poll *is* the handshake succeeding.
+1. **Is it still hunting?** Two minutes after boot, that's it. Restart it.
+2. **Read the log.** Unmapped reads get logged once each as
+   `charger read unmapped register 0x40XX`. A register it insists on that isn't
+   in the N1-CT manual is the best clue you can get, and I'd like to see it.
+3. **Check for writes.** `charger wrote 0x4004` means it's reconfiguring baud or
+   parity. The emulator applies it and reopens the port.
+4. **Try other identity values.** `meter_code` first, `[0x0102, 0x0103]` tries
+   both in one detection window. Then `software_version`, then `serial_number`.
+5. **Try `unknown_register_policy: exception`.** Answering zeros to everything
+   is permissive, and a charger ruling models out may expect a refusal.
+6. **Check the app.** Installer settings must have the meter set to N1-CT.
+   Picking EM340 or the P1 module gives you a completely different register map.
 
-**7. Prove the throttling.** With the rotary switch at 16 A, start a charge and
-confirm it settles there. Then switch on an oven or a kettle and watch the
-charging current drop below 16 A within a few seconds — that is Power Boost
-working, as opposed to the charger merely sitting at its own limit. Verify in
-the myWallbox app that it shows a reduced limit rather than an error.
+## Three-phase
 
-## If the charger will not accept the meter
+Not supported. `meter.phases` must be 1 and the program exits if it isn't.
 
-The symptom is unmistakable: the charger keeps re-reading the identity block and
-never settles into polling measurements, or Power Boost switches itself off in
-the app. Work down this list.
+The N1-CT is single phase and I only have one number to report, so L2 and L3
+would read 0 A. The charger takes that as "those phases are idle" and draws
+freely on them. It would look like it was working while protecting nothing,
+which is worse than not running.
 
-1. **Is it still hunting?** It stops looking about two minutes after it boots.
-   Restart it from the app, with this program already running.
-2. **Read the logs.** Every unanswered register is logged once as
-   `charger read unmapped register 0x40XX`, and the status line lists them. A
-   register the charger insists on that the N1-CT manual does not document is
-   the single most valuable clue you can get — it means the charger is talking
-   to a different meter model than we think. Please
-   [report it](CONTRIBUTING.md).
-3. **Check the writes.** `charger wrote 0x4004 …` means it is reconfiguring the
-   meter's baud rate or parity. The emulator applies those and reopens the port
-   automatically, but the log tells you it happened.
-4. **Try the identity values.** In order of suspicion: `meter_code` (set it to
-   `[0x0102, 0x0103]` to have both tried inside one detection window), then
-   `software_version` / `protocol_version`, then `serial_number`.
-5. **Try `unknown_register_policy: exception`.** Answering zeros to everything is
-   permissive, but a charger probing for *which* meter it has may use an
-   exception response to rule models out — and a meter that answers everything
-   may look wrong.
-6. **Check the app.** The meter model is selected in the installer settings; it
-   must be set to the N1-CT (`N1CT` in Wallbox's compatibility table). Selecting
-   an EM340 or a P1 module makes the charger speak a different register map
-   entirely.
+Doing it properly needs per-phase data and emulation of a meter Wallbox actually
+pairs with three-phase installs (INEPRO N3, or the Carlo Gavazzi EM340 the
+charger already probes for). I can't test either. PRs welcome.
 
-## Three-phase installations
+## Limits
 
-**Not supported. `meter.phases` must be 1, and the program exits with an
-explanation if it is not.**
+Two separate limits, doing separate jobs:
 
-This is a deliberate refusal rather than a missing feature. The emulated N1-CT
-is a single-phase meter, and this program has exactly one grid power figure to
-report, so it would answer **0 A for L2 and L3**. A charger reads that as "those
-phases are idle" and will happily draw its full current on them no matter how
-loaded your supply actually is — which is the opposite of what you installed
-this for, while looking like it works. Silently under-protecting two thirds of a
-connection is worse than not running at all.
+- **The rotary switch** caps the charger in its own firmware. It holds if this
+  crashes, if the cable falls out, if Home Assistant dies, and if everything I
+  think I know about Power Boost is wrong. Nothing here can override it.
+- **`limits.installation_current_a`** is your fuse, and what the charger
+  balances against. Match it to the app.
 
-Making it work properly needs two things, and
-[contributions are welcome](CONTRIBUTING.md):
+With a 35 A fuse and the switch at 16 A: idle house, charger takes 16 A. House
+at 25 A, Power Boost allows 10 A. This program dies, charger is still capped at
+16 A.
 
-- a meter model that carries per-phase power, current and voltage rather than
-  one aggregate;
-- emulation of a meter that Wallbox actually pairs with three-phase
-  installations — an INEPRO N3, or the Carlo Gavazzi EM340 that the charger
-  already probes for at `0x000B` during the handshake.
+The emulator has no limit of its own on purpose. A meter can't address the
+charger and can't separate the charger's draw from the rest of the house, so
+anything it did here would mean lying about the measurement, and it would fall
+apart while exporting.
 
-Until then, a three-phase household wanting load management should look at the
-[alternatives](#alternatives-if-this-stalls).
+## Solar
 
-## Capping the charger
+**I have not tested this.** Power Boost I proved with a kettle. Eco-Smart I've
+never even switched on, and no charge session has run on solar surplus.
 
-Set the charger's internal **rotary switch** to the highest current you are
-willing to have drawn with no load management at all — **position 4 (16 A)** is
-the right place to start. That is the cap, and the switch is the right place for
-it: enforced by the charger's own firmware, so it holds if this service crashes,
-if the RS485 cable falls out, if your data source is down, and if every
-assumption in this repo about the Power Boost algorithm turns out to be wrong.
-Nothing here can override it.
+What I do know is that the meter reports export correctly: `0x5012` goes
+negative, current stays an unsigned magnitude, reverse energy accumulates. That
+matches what a real CT does, direction lives in the sign of the power.
 
-Leave load management aimed at the real fuse — "maximum current per phase" in
-the app, and `limits.installation_current_a` here to match.
-
-The two limits then do separate jobs, which is why this combination behaves
-well in every case. Taking a 35 A fuse and a 16 A cap as the example:
-
-| Situation | Result |
-|---|---|
-| House idle | Charger takes 16 A, its own maximum. Total is half the fuse. |
-| House drawing 25 A | Power Boost allows 10 A, below the cap, so it throttles. |
-| Exporting solar | Eco-Smart uses the real surplus, and the switch stops it at 16 A. |
-| This service dies | Charger is still hard-limited to 16 A against a 35 A fuse. |
-
-The meter reports measured values untouched, so what you see in the app is what
-your house is actually doing.
-
-The emulator deliberately has no current limit of its own. A meter cannot
-address the charger and cannot tell the charger's draw apart from the rest of
-the house — it only sees one number at the connection point — so anything it
-did here would amount to lying about the load, and would come apart exactly
-when you are exporting. The limit belongs in the charger.
-
-## Solar charging
-
-A real CT reports current as an unsigned magnitude and puts the direction in the
-**sign of active power**. This emulator reproduces that faithfully
-(`current_sign: magnitude`), so `0x5012` goes negative when you export.
-
-If testing shows the charger throttling *while you are exporting* — meaning it
-reads current and ignores the sign — switch to `current_sign: signed`. That
-stops being a faithful N1-CT emulation, but it is the correct behaviour, and it
-costs nothing to try.
+What I don't know is whether the charger reads that sign or just the magnitude.
+If it throttles while you're exporting, it's ignoring the sign, and
+`current_sign: signed` should fix it. That setting exists precisely because I
+couldn't test this. If you find out which one is right,
+[please tell me](CONTRIBUTING.md).
 
 ## Failsafe
 
-If no fresh reading arrives within `failsafe.max_data_age_s` (default 15 s), the
-emulator reports `failsafe.current_a` instead of the last known value. The
-charger sees the installation well past its limit and backs down to its minimum.
+If no fresh reading arrives within `failsafe.max_data_age_s` (15 s), the meter
+reports `failsafe.current_a` instead of the last value it had. The charger sees
+the installation over its limit and backs off.
 
-That value has to sit *above* `limits.installation_current_a`, and the config
-refuses to start otherwise. Reporting exactly the limit is a fixed point of the
-charger's control loop — `allowance = limit - (limit - own_current) = own_current`
-— so it would hold whatever current it was already drawing rather than back off.
-Overshooting the limit is what forces it down. Left unset, it is derived as 1.5×
-your installation limit.
+That number has to be **above** `installation_current_a` and the config won't
+start otherwise. Reporting exactly the limit is a fixed point of the charger's
+control loop (`allowance = limit − (limit − own_current)`), so it would just sit
+there instead of backing off.
 
-This matters more than it looks. Your home automation restarting, Wi-Fi
-dropping, or the P1 reader hanging all leave the last reading looking perfectly
-plausible — and a stale "house is drawing 300 W" is exactly the input that lets
-the charger sit at maximum while the induction hob is on. Keeping the Modbus
-link alive and reporting a *pessimistic* value is safer than going silent,
-because a charger that loses its meter may fault rather than throttle.
+This matters more than it looks. Home Assistant restarting, wifi dropping, the
+P1 reader hanging: all of them leave a perfectly plausible last reading. A stale
+"house is drawing 300 W" is exactly what lets the charger sit at maximum while
+the oven is on. Better to keep the link up and lie pessimistically, because a
+charger that loses its meter may fault instead of throttling.
 
-Energy counters are integrated from power and persisted to
-`meter.energy_file`, so they stay monotonic across restarts the way a real
-meter's would.
+Energy counters are integrated from power and persisted, so they stay monotonic
+across restarts like a real meter's would.
 
 ## Register map
 
-From the N1 CT user manual V1.17, section 9. Every value is 2 registers unless
-noted; float32 is big-endian ABCD. `--dump-map` prints this with live values.
+From the N1 CT manual V1.17 section 9. Two registers each, big-endian float32
+unless noted. `--dump-map` prints it with live values.
 
-| Register | Content | Type | Unit |
-|---|---|---|---|
-| `0x4000` | Serial number | int32 | |
-| `0x4002` | Meter code | int16 | |
-| `0x4003` | Meter ID (Modbus) | int16 | |
-| `0x4004` | Baud rate | int16 | |
-| `0x4005` | Protocol version | float32 | |
-| `0x4007` | Software version | float32 | |
-| `0x4009` | Hardware version | float32 | |
-| `0x400B` | Meter amps | int32 | A |
-| `0x400F` | Combination code | int16 | |
-| `0x4011` | Parity (1=even, 2=none, 3=odd) | int16 | |
-| `0x401B` | Software version (CRC) | int32 | |
-| `0x5000` | Voltage | float32 | V |
-| `0x5002` | L1 voltage | float32 | V |
-| `0x5008` | Grid frequency | float32 | Hz |
-| `0x500A` | **Current** | float32 | A |
-| `0x500C` | L1 current | float32 | A |
-| `0x5012` | **Total active power** | float32 | kW |
-| `0x5014` | L1 active power | float32 | kW |
-| `0x501A` | Total reactive power | float32 | kvar |
-| `0x5022` | Total apparent power | float32 | kVA |
-| `0x502A` | Power factor | float32 | |
-| `0x6000` | Total active energy | float32 | kWh |
-| `0x6006` | L1 active energy | float32 | kWh |
-| `0x600C` | Forward active energy | float32 | kWh |
-| `0x6018` | Reverse active energy | float32 | kWh |
+| | | |
+|---|---|---|
+| `0x4000` | Serial number | int32 |
+| `0x4002` | Meter code | int16 |
+| `0x4003` | Modbus id | int16 |
+| `0x4004` | Baud rate | int16 |
+| `0x4005` | Protocol version | |
+| `0x4007` | Software version | |
+| `0x4009` | Hardware version | |
+| `0x400B` | Meter amps | int32 |
+| `0x400F` | Combination code | int16 |
+| `0x4011` | Parity (1=even, 2=none, 3=odd) | int16 |
+| `0x401B` | Software CRC | int32 |
+| `0x5000` `0x5002` | Voltage, L1 voltage | V |
+| `0x5008` | Frequency | Hz |
+| `0x500A` `0x500C` | **Current**, L1 current | A |
+| `0x5012` `0x5014` | **Active power**, L1 | kW |
+| `0x501A` `0x5022` | Reactive, apparent power | kvar, kVA |
+| `0x502A` | Power factor | |
+| `0x6000` `0x6006` | Total energy, L1 | kWh |
+| `0x600C` `0x6018` | Forward, reverse energy | kWh |
 
-Writable with function 06: `0x4003` Modbus ID, `0x4004` baud rate,
-`0x4011` parity, `0x400F` combination code. The emulator accepts these and
-reopens the serial port with the new settings.
+Writable with 06: `0x4003`, `0x4004`, `0x4011`, `0x400F`. The emulator accepts
+those and reopens the port with the new settings.
 
-Note the units: **power is in kW, not W**. Reporting watts here would make the
-charger think your house is drawing 3450 kW.
+**Power is in kW, not W.** Send watts and the charger thinks your house is
+pulling 3450 kW.
 
 ## Layout
 
-| Path | |
+| | |
 |---|---|
-| [wallbox_powerboost/rtu.py](wallbox_powerboost/rtu.py) | Modbus RTU slave: framing, CRC, resync, baud/parity probing |
-| [wallbox_powerboost/n1ct.py](wallbox_powerboost/n1ct.py) | N1-CT register map and the register file that logs what the charger asks |
-| [wallbox_powerboost/model.py](wallbox_powerboost/model.py) | Meter state, energy integration, failsafe |
-| [wallbox_powerboost/sources/base.py](wallbox_powerboost/sources/base.py) | What an energy source is, and the registry `source.type` selects from |
-| [wallbox_powerboost/sources/homeassistant.py](wallbox_powerboost/sources/homeassistant.py) | WebSocket subscription with REST fallback |
-| [tools/selftest.py](tools/selftest.py) | End-to-end test over a pty pair, no hardware |
-| [tools/test_master.py](tools/test_master.py) | Polls the emulator the way the charger does |
+| [rtu.py](evse_meter/rtu.py) | Modbus RTU slave: framing, CRC, resync, baud/parity probing |
+| [n1ct.py](evse_meter/n1ct.py) | Register map, and logging what the charger asks for |
+| [model.py](evse_meter/model.py) | Meter state, energy integration, failsafe |
+| [sources/base.py](evse_meter/sources/base.py) | What a data source is; `source.type` picks one |
+| [sources/homeassistant.py](evse_meter/sources/homeassistant.py) | WebSocket with REST fallback |
+| [tools/selftest.py](tools/selftest.py) | End-to-end over a pty pair |
+| [tools/test_master.py](tools/test_master.py) | Polls the emulator like the charger does |
 
-RTU frames are delimited by expected length and CRC rather than by the usual
-3.5-character idle gap, because USB serial adapters buffer with millisecond
-jitter and gap timing is unreliable through them.
+Frames are delimited by expected length and CRC, not the usual 3.5-character
+idle gap, because USB serial adapters buffer with milliseconds of jitter.
 
-Home Assistant is the only data source shipped, but it is not privileged:
+Home Assistant isn't special, it's just the only source written so far.
 `source.type` picks a class out of a registry and that class brings its own
-config options with it. Adding MQTT, a Shelly EM, or a P1 reader read directly
-over serial is one module — see [CONTRIBUTING.md](CONTRIBUTING.md).
+config options. MQTT or a P1 reader would be one module, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Contributing
+## Alternatives
 
-Reports from chargers other than a Pulsar Plus are the most valuable thing this
-project can receive, and three-phase support is the largest thing it is
-missing. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Any of these may suit you better, and two of them are supported products:
 
-## Alternatives, if this stalls
-
-- **Wallbox's own P1 module** (P1MB, ~€209) reads the Dutch smart meter's P1
-  port and speaks Modbus to the charger — the same idea, supported, and it
-  appears in the official EMS installation guide.
-- **A real N1-CT** (~€80) wired as the accessory would be. Cheaper than the
-  branded kit, and no software to maintain.
-- **Control the charger instead of feeding it a meter.** The myWallbox API lets
-  Home Assistant set the maximum charging current directly. It is cloud-
-  dependent and slow to react (tens of seconds), so it is a decent convenience
-  feature and a poor fuse protector. Power Boost reacts in the charger itself,
-  which is why it is worth the effort.
+- **Wallbox's own Power Boost accessory.** A meter, an install guide, and
+  someone to call.
+- **Wallbox's P1 module** (P1MB) reads the Dutch smart meter's P1 port. Same
+  idea, supported, in the official EMS guide.
+- **A real N1-CT**, wired as the accessory would be. No software to maintain.
+- **Drive the charger instead.** The myWallbox API can set the charging current
+  from Home Assistant. Cloud-dependent and slow (tens of seconds), so it's a
+  convenience feature rather than fuse protection.
 
 ## Sources
 
-- [INEPRO N1-CT product page and user manual](https://www.ineprometering.com/product/n1-ct-electricity-meter) — the register map in section 9
-- [Wallbox EMS installation guide, July 2024](https://support.wallbox.com/wp-content/uploads/ht_kb/2024/09/EN_EMS_Installation-Guide.pdf) — wiring, terminals, rotary switch, meter compatibility table
-- [relyd/modbussniffer](https://github.com/relyd/modbussniffer) — a capture of real Pulsar Plus ↔ N1-CT traffic
-- [Inepro register map reference](https://www.aggsoft.com/modbus-data-logging/inepro-metering.htm) — corroborates the same addresses across the PRO family
+- [INEPRO N1-CT manual](https://www.ineprometering.com/product/n1-ct-electricity-meter) — register map in section 9
+- [Wallbox EMS installation guide](https://support.wallbox.com/wp-content/uploads/ht_kb/2024/09/EN_EMS_Installation-Guide.pdf) — wiring, terminals, rotary switch, meter compatibility
+- [relyd/modbussniffer](https://github.com/relyd/modbussniffer) — a real capture of Pulsar Plus ↔ N1-CT traffic
+- [Inepro register reference](https://www.aggsoft.com/modbus-data-logging/inepro-metering.htm)
 
 ## Licence
 
-[MIT](LICENSE). Not affiliated with, endorsed by, or supported by Wallbox
-Chargers S.L. or inepro Metering B.V.
+[MIT](LICENSE). Not affiliated with Wallbox Chargers S.L. or inepro Metering B.V.

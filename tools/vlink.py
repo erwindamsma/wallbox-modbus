@@ -4,7 +4,7 @@ can talk with no RS485 hardware at all.
 
     python3 tools/vlink.py
     # then, in other terminals:
-    python3 -m wallbox_powerboost -c config.yaml     # with serial.port: /tmp/wallbox-a
+    python3 -m evse_meter -c config.yaml     # with serial.port: /tmp/wallbox-a
     python3 tools/test_master.py /tmp/wallbox-b
 
 Bytes written to one end appear at the other, which is enough to exercise

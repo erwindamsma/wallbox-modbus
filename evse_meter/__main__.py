@@ -1,5 +1,5 @@
-"""Entry point: pretend to be an INEPRO N1-CT so a Wallbox charger will do
-dynamic load management and solar charging without the Power Boost accessory.
+"""Pretend to be an INEPRO N1-CT energy meter, so a Wallbox charger will do its
+own dynamic load management from whatever data source you configure.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from .model import MeterModel
 from .n1ct import RegisterFile, build_register_map
 from .rtu import ModbusRtuSlave
 
-log = logging.getLogger("wallbox_powerboost")
+log = logging.getLogger("evse_meter")
 
 
 def parse_args(argv=None):
-    p = argparse.ArgumentParser(prog="wallbox-powerboost", description=__doc__)
+    p = argparse.ArgumentParser(prog="evse-meter", description=__doc__)
     p.add_argument("-c", "--config", default="config.yaml", help="path to the YAML config")
     p.add_argument("--passive", action="store_true",
                    help="decode and log bus traffic but never transmit; use this to "

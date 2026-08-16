@@ -55,4 +55,4 @@ jobs:
       # change that invalidates it has to fail here rather than in someone's
       # meter cupboard. --dump-map exercises the full load-and-validate path.
       - name: The example config still parses
-        run: python -m wallbox_powerboost -c config.example.yaml --dump-map
+        run: python -m evse_meter -c config.example.yaml --dump-map

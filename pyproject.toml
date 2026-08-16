@@ -3,8 +3,8 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wallbox-powerboost"
-description = "Emulate an INEPRO N1-CT energy meter over Modbus RTU so a Wallbox charger runs Power Boost and Eco-Smart without the accessory"
+name = "evse-meter"
+description = "Emulate an INEPRO N1-CT energy meter over Modbus RTU, so an EV charger's load management can run from metering data you already have"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -32,10 +32,10 @@ Homepage = "https://github.com/erwindamsma/wallbox-modbus"
 Issues = "https://github.com/erwindamsma/wallbox-modbus/issues"
 
 [project.scripts]
-wallbox-powerboost = "wallbox_powerboost.__main__:main"
+evse-meter = "evse_meter.__main__:main"
 
 [tool.setuptools]
-packages = ["wallbox_powerboost", "wallbox_powerboost.sources"]
+packages = ["evse_meter", "evse_meter.sources"]
 
 [tool.setuptools.dynamic]
-version = { attr = "wallbox_powerboost.__version__" }
+version = { attr = "evse_meter.__version__" }

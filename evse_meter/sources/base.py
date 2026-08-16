@@ -1,13 +1,11 @@
-"""What an energy source is, and the registry that finds one by name.
+"""Energy sources, and the registry that finds one by name.
 
-A source is anything that can keep a MeterModel fed with the power measured at
-the grid connection point. Home Assistant is the only one shipped, but nothing
-above this line knows that: `source.type` in the config selects a class from the
-registry below, and that class brings its own configuration options with it.
+A source keeps the MeterModel fed with power measured at the grid connection.
+`source.type` picks a class out of the registry below and that class brings its
+own config options, so nothing outside this package knows Home Assistant exists.
 
-Writing a new one means three things -- a config dataclass, a `run()` that
-loops forever, and a `register()` call. See homeassistant.py as the worked
-example and CONTRIBUTING.md for what a source has to get right.
+Writing one: a config dataclass, a run() that loops forever, a register() call.
+homeassistant.py is the worked example.
 """
 
 from __future__ import annotations
@@ -31,19 +29,15 @@ class SourceConfig:
 class EnergySource:
     """Base class for energy sources.
 
-    Subclasses must:
+    Subclasses must call model.update(power_w=..., voltage=...) with power at
+    the grid connection, positive when importing. Flip the sign in the source
+    if yours reports the other way round: get it wrong and the charger speeds
+    up exactly when it should back off. Keep self.connected honest, the status
+    line prints it, and let run() pass CancelledError through on shutdown.
 
-    * call ``model.update(power_w=..., voltage=...)`` with the power measured
-      at the grid connection point, **positive when importing**. Getting that
-      sign backwards makes the charger speed up exactly when it should back
-      off, so a source is responsible for normalising it;
-    * keep ``self.connected`` truthful, because the status line reports it;
-    * let ``run()`` raise ``asyncio.CancelledError`` through on shutdown.
-
-    A source does *not* have to handle its own failure. Simply ceasing to call
-    ``model.update()`` trips the failsafe after ``failsafe.max_data_age_s``,
-    which is the safe outcome. Reconnecting on your own is a kindness, not a
-    requirement.
+    You don't have to handle your own failures. Just stop calling update() and
+    the failsafe trips after failsafe.max_data_age_s, which is the safe
+    outcome. Reconnecting yourself is nice, not required.
     """
 
     #: The ``source.type`` value that selects this class.
@@ -58,11 +52,11 @@ class EnergySource:
 
     @classmethod
     def validate(cls, cfg: SourceConfig, complete: bool = True) -> None:
-        """Raise ValueError if this config cannot work.
+        """Raise ValueError if this config can't work.
 
-        ``complete`` is False when the config is not expected to be finished
-        yet -- ``--list-entities`` runs precisely to find out what to put in
-        it -- so only check what is needed to make contact.
+        complete=False means the config isn't finished yet (--list-entities
+        runs to find out what to put in it), so only check what you need to
+        make contact.
         """
 
     def describe(self) -> str:
@@ -75,13 +69,12 @@ class EnergySource:
 
     @classmethod
     async def discover(cls, cfg: SourceConfig) -> list[dict] | None:
-        """Candidate readings this source can see, for ``--list-entities``.
+        """Readings this source can see, for --list-entities.
 
-        Return a list of ``{"id", "value", "unit", "name", "likely"}`` dicts,
-        likeliest grid sensors flagged with ``likely``. Return None (the
-        default) if the source has nothing to enumerate -- a fixed serial
-        protocol, say -- and the CLI will say so rather than print an empty
-        table.
+        Return {"id", "value", "unit", "name", "likely"} dicts with the
+        probable grid sensors flagged. None (the default) means there's
+        nothing to enumerate, and the CLI says so instead of printing an
+        empty table.
         """
         return None
 

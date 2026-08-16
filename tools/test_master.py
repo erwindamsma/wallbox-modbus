@@ -19,8 +19,8 @@ import serial
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 
-from wallbox_powerboost import n1ct  # noqa: E402
-from wallbox_powerboost.rtu import append_crc, crc_ok  # noqa: E402
+from evse_meter import n1ct  # noqa: E402
+from evse_meter.rtu import append_crc, crc_ok  # noqa: E402
 
 IDENTITY = [
     (n1ct.REG_SERIAL_NUMBER, 2, "i32"),

@@ -1,5 +1,5 @@
 [Unit]
-Description=Wallbox Power Boost meter emulator (INEPRO N1-CT over Modbus RTU)
+Description=EV charger energy meter emulator (INEPRO N1-CT over Modbus RTU)
 Documentation=https://github.com/erwindamsma/wallbox-modbus
 After=network-online.target
 Wants=network-online.target
@@ -10,12 +10,12 @@ Type=simple
 User=wallbox
 SupplementaryGroups=dialout
 WorkingDirectory=/opt/wallbox-modbus
-ExecStart=/opt/wallbox-modbus/.venv/bin/python -m wallbox_powerboost -c /etc/wallbox-powerboost/config.yaml
+ExecStart=/opt/wallbox-modbus/.venv/bin/python -m evse_meter -c /etc/evse-meter/config.yaml
 Restart=always
 RestartSec=5
 
-# Creates and owns /var/lib/wallbox-powerboost for the energy counters.
-StateDirectory=wallbox-powerboost
+# Creates and owns /var/lib/evse-meter for the energy counters.
+StateDirectory=evse-meter
 
 NoNewPrivileges=yes
 PrivateTmp=yes

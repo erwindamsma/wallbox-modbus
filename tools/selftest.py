@@ -20,11 +20,11 @@ import yaml
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from wallbox_powerboost import n1ct  # noqa: E402
-from wallbox_powerboost.config import IdentityConfig, SerialConfig  # noqa: E402
-from wallbox_powerboost.model import MeterModel  # noqa: E402
-from wallbox_powerboost.n1ct import RegisterFile  # noqa: E402
-from wallbox_powerboost.rtu import ModbusRtuSlave, append_crc, crc_ok, crc16  # noqa: E402
+from evse_meter import n1ct  # noqa: E402
+from evse_meter.config import IdentityConfig, SerialConfig  # noqa: E402
+from evse_meter.model import MeterModel  # noqa: E402
+from evse_meter.n1ct import RegisterFile  # noqa: E402
+from evse_meter.rtu import ModbusRtuSlave, append_crc, crc_ok, crc16  # noqa: E402
 
 failures = []
 
@@ -175,7 +175,7 @@ def main() -> int:
           f"{snap.active_power_kw:.3f} kW / {snap.current:.2f} A")
 
     print("\nconfig validation")
-    from wallbox_powerboost.config import Config, _validate  # noqa: E402
+    from evse_meter.config import Config, _validate  # noqa: E402
 
     def rejects(name, **kw):
         cfg = Config()
@@ -202,7 +202,7 @@ def main() -> int:
     print("\nconfig file handling")
     import tempfile  # noqa: E402
 
-    from wallbox_powerboost import config as config_mod  # noqa: E402
+    from evse_meter import config as config_mod  # noqa: E402
 
     base = {
         "limits": {"installation_current_a": 25.0},

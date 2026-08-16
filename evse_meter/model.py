@@ -1,15 +1,14 @@
 """Meter state: what the emulated N1-CT currently reports.
 
-Fed by an energy source (Home Assistant), read by the Modbus thread. The two
-run in different threads, so updates are taken under a lock and readers get an
-immutable snapshot.
+Written by the energy source, read by the Modbus thread. Different threads, so
+updates take a lock and readers get an immutable snapshot.
 
-The failsafe is the important part. This device sits between the charger and a
-35 A main fuse: if our data goes stale we must not keep reporting the last
-known -- possibly very low -- house load, or the charger will happily keep
-pulling 32 A while the house adds another 20 A on top. When data is stale we
-report a current at or above the installation limit, which drives the charger
-down to its minimum and eventually to a stop.
+The failsafe is the part that matters. This sits between a charger and a main
+fuse, so when the data goes stale we must not keep reporting the last house
+load we saw, which may be very low. The charger would carry on drawing its
+maximum while the rest of the house piles on top. Stale data reports a current
+above the installation limit instead, which drives the charger down to its
+minimum and eventually to a stop.
 """
 
 from __future__ import annotations

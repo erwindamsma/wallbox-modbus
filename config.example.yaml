@@ -1,72 +1,51 @@
-# Wallbox Power Boost emulator -- example configuration.
-# Copy to config.yaml and edit. Every value marked "SET THIS" describes your
-# installation and has no safe default.
+# Copy to config.yaml and edit.
 
 serial:
-  # CH340/CH341 and FTDI adapters show up as /dev/ttyUSB0. Newer WCH chips
-  # (CH343, CH9102) are CDC-ACM class devices and show up as /dev/ttyACM0
-  # instead. Check with: dmesg | tail  after plugging it in.
+  # CH340/FTDI show up as /dev/ttyUSB0, CH343/CH9102 as /dev/ttyACM0.
+  # Check with: dmesg | tail
   port: /dev/ttyUSB0
 
-  # CONFIRMED against a Pulsar Plus: the bus runs at 19200 8N1, unit id 1.
-  # Note this contradicts the N1-CT manual, which documents 9600/even as the
-  # factory default -- Wallbox evidently reconfigures the meter it ships.
-  # If yours differs, set both to "auto" and the emulator listens on each
-  # combination until it sees a CRC-valid frame, then logs which one worked.
-  # Pin the values it reports afterwards, and please open an issue saying
-  # which charger produced them.
+  # Confirmed against a Pulsar Plus. The N1-CT manual says 9600/even, which is
+  # wrong for this bus. Set both to "auto" if yours disagrees and the emulator
+  # will find it and log what worked.
   baud: 19200       # auto, 9600, 19200
   parity: none      # auto, even, none, odd
   stopbits: 1
   unit_id: 1
   probe_seconds: 8
 
-  # Most USB-RS485 dongles switch direction by themselves. Set this only if
-  # yours needs RTS to key the transmitter.
+  # Only if your adapter needs RTS to key the transmitter.
   rts_direction_control: false
   rts_active_high: true
-  # Enable if your adapter loops transmitted bytes back into the receiver.
+  # Only if it loops transmitted bytes back into the receiver.
   discard_echo: false
 
 meter:
-  # Phases at your grid connection. Only 1 works, and the program refuses to
-  # start on anything else rather than leave L2 and L3 reporting zero while
-  # the charger draws on them. See README, "Three-phase installations".
+  # Must be 1. On three phases L2 and L3 would read 0 A and the charger would
+  # draw freely on them, so it refuses to start instead.
   phases: 1
 
-  # SET THIS to your nominal supply voltage: 230 across most of Europe.
-  # Only used to convert power to current when no voltage sensor is configured.
+  # Used to convert power to current when no voltage sensor is set.
   nominal_voltage: 230.0
 
-  # A real CT reports current as an unsigned magnitude and puts the direction
-  # in the sign of active power. "magnitude" reproduces that faithfully.
-  # Switch to "signed" only if testing shows the charger throttles when you
-  # are exporting to the grid -- see README, "Solar charging".
+  # A real CT reports current unsigned and puts direction in the sign of power.
+  # Switch to "signed" if the charger throttles while you export. Untested.
   current_sign: magnitude
 
-  # What to answer when the charger reads a register the N1-CT does not have.
-  # "zero" is permissive and keeps the handshake alive; "exception" is what
-  # real hardware does. Start permissive.
+  # What to answer for registers the N1-CT doesn't have. "zero" is permissive,
+  # "exception" is what real hardware does. Start permissive.
   unknown_register_policy: zero
 
-  # Energy counters are integrated from power and survive restarts. The
-  # systemd unit creates this directory itself via StateDirectory; running
-  # from a shell, point it somewhere your own user can write.
-  energy_file: /var/lib/wallbox-powerboost/energy.json
+  # The systemd unit creates this via StateDirectory. Running from a shell,
+  # point it somewhere you can write.
+  energy_file: /var/lib/evse-meter/energy.json
 
-  # Values the charger reads once at startup to identify the meter. The
-  # measurement registers are documented; this identity block is where the
-  # guesswork lives. If Power Boost never activates, this is the first place
-  # to look -- see README, "If the charger will not accept the meter".
+  # What the charger reads once at startup to identify the meter. If Power
+  # Boost never comes on, this block is the first place to look.
   identity:
     serial_number: 20250001
-    # CONFIRMED: a Pulsar Plus accepts 0x0102 here and then starts polling
-    # measurements. 0x0102 is INEPRO's direct-connect variant code (0x0103 is
-    # the CT variant, which it does NOT accept). Getting this wrong is the
-    # difference between "no meter connected" and a working Power Boost.
-    # A list of candidates may be given instead, e.g. [0x0102, 0x0103]: the
-    # emulator serves a different one each time the charger reads 0x4002 and
-    # freezes on whichever gets it as far as reading measurements.
+    # The gate. 0x0102 is accepted, 0x0103 is not, even though an N1-CT is a
+    # CT meter. A list like [0x0102, 0x0103] tries both in one detection window.
     meter_code: 0x0102
     modbus_id: 1
     baud_code: 9600
@@ -74,64 +53,48 @@ meter:
     software_version: 1.17
     hardware_version: 1.0
     meter_amps: 100      # CT primary rating of a real N1-CT
-    combination_code: 5  # 05 = forward + reverse
-    parity_code: 1       # 1 = even
+    combination_code: 5  # forward + reverse
+    parity_code: 1       # even
     software_crc: 0
 
 limits:
-  # SET THIS -- required, and the one number that matters most. The rating of
-  # the fuse or main breaker the charger has to share with the rest of the
-  # house, in amps. Set the same number as "maximum current per phase" in the
-  # myWallbox app, under Load Management.
-  #
-  # The emulator does not enforce it; the charger does. It is here so the
-  # failsafe below can be checked against it. The charger's own ceiling is set
-  # by its internal rotary switch -- position 4 for 16 A.
+  # Required. Your main fuse rating, in amps. Set the same number under Load
+  # Management in the app. The charger enforces it, not this program.
   installation_current_a: 25.0
 
 failsafe:
-  # If no fresh reading arrives within this many seconds, report
-  # failsafe.current_a so the charger backs off. Do not raise this much:
-  # it is the window in which the charger may be pulling its maximum on data
-  # you can no longer vouch for.
+  # Report the failsafe current if no reading arrives for this long. Don't
+  # raise it much: it's how long the charger may pull its maximum on data you
+  # can no longer vouch for.
   max_data_age_s: 15
 
-  # What to report when the data goes stale. Must be ABOVE
-  # limits.installation_current_a -- reporting exactly the limit is a fixed
-  # point of the charger's control loop, so it would hold its current rather
-  # than back off. Leave it out and it is derived as 1.5x the installation
-  # limit, which is what you want unless you have a reason otherwise.
+  # Must be above installation_current_a, or the charger reads it as "exactly
+  # at the limit" and holds instead of backing off. Left out, it's 1.5x.
   #current_a: 37.5
 
 source:
-  # Where live grid power comes from. `homeassistant` is the only one shipped;
-  # see CONTRIBUTING.md if you want to add another.
+  # Only homeassistant so far. See CONTRIBUTING.md to add another.
   type: homeassistant
 
   url: http://homeassistant.local:8123
-  # A long-lived access token: Home Assistant profile -> Security -> Long-lived
-  # access tokens. Treat config.yaml as a secret once you paste one in; it is
-  # gitignored for that reason.
+  # Profile -> Security -> Long-lived access tokens. Keep this file private.
   token: "PASTE_A_LONG_LIVED_ACCESS_TOKEN_HERE"
 
-  mode: push          # push = WebSocket (instant), poll = REST
+  mode: push          # push = WebSocket, poll = REST
   poll_interval_s: 1.0
 
-  # Preferred: one sensor holding net grid power, positive when importing and
-  # negative when exporting. Run --list-entities to see the candidates, then
-  # --check-source to confirm the sign before you wire anything.
+  # Net grid power, positive importing. Find it with --list-entities, then
+  # check the sign with --check-source before you wire anything.
   power_entity: sensor.p1_meter_active_power
 
-  # Alternative: separate import and export sensors, both positive; the
-  # emulator subtracts them. Used only when power_entity is unset.
+  # Or a positive pair, subtracted. Only used if power_entity is unset.
   import_entity: null
   export_entity: null
 
-  # Optional. Improves the power-to-current conversion; falls back to
-  # meter.nominal_voltage when absent.
+  # Optional, improves the power-to-current conversion.
   voltage_entity: sensor.p1_meter_voltage_phase_l1
 
-  # Override unit detection if the entity has no unit_of_measurement.
+  # Only if the entity has no unit_of_measurement.
   power_unit: null    # W, kW
 
 log_level: INFO
