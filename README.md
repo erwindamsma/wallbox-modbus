@@ -86,8 +86,10 @@ fine.
 
 ## Hardware and wiring
 
-A USB-RS485 adapter with **A, B and GND** broken out. Automatic direction
-control (CH340, CH343, CP2102, FTDI) saves you fiddling with RTS. CH340 and FTDI
+A USB-**RS485** adapter with **A, B and GND** broken out. Not a USB-TTL
+programmer, they look alike and TTL levels on A/B can damage things. Automatic
+direction control (CH340, CH343, CP2102, FTDI) saves you fiddling with RTS.
+CH340 and FTDI
 show up as `/dev/ttyUSB0`; CH343 and CH9102 are CDC-ACM and show up as
 `/dev/ttyACM0`. TX/RX LEDs are worth it, they tell you the charger is
 transmitting before any software works.
@@ -156,7 +158,8 @@ sudo systemctl enable --now evse-meter
 
 Do these in order, each one fails differently.
 
-**1. Test the logic.** `python tools/selftest.py` — pty pair, no hardware.
+**1. Test the logic.** `./.venv/bin/python tools/selftest.py` — pty pair, no
+hardware.
 
 **2. Test the data.** `--list-entities` to find your sensor, then
 `--check-source` to watch it live without touching the serial port. **Switch on
