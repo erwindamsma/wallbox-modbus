@@ -12,10 +12,10 @@ import sys
 
 from . import config as config_mod
 from . import n1ct
+from . import sources
 from .model import MeterModel
 from .n1ct import RegisterFile, build_register_map
 from .rtu import ModbusRtuSlave
-from .sources.homeassistant import HomeAssistantSource
 
 log = logging.getLogger("wallbox_powerboost")
 
@@ -29,10 +29,10 @@ def parse_args(argv=None):
     p.add_argument("--dump-map", action="store_true",
                    help="print the register map that would be served and exit")
     p.add_argument("--list-entities", action="store_true",
-                   help="list every power sensor in Home Assistant, likeliest grid "
-                        "sensors first, so you can pick one for source.power_entity")
+                   help="list the readings the configured source can see, likeliest "
+                        "grid sensors first, so you can pick one to measure")
     p.add_argument("--check-source", action="store_true",
-                   help="connect to Home Assistant and print live readings without "
+                   help="connect to the energy source and print live readings without "
                         "touching the serial port; use this to verify entities, units "
                         "and the sign convention before wiring anything")
     p.add_argument("--log-level", help="override log_level from the config")
@@ -64,27 +64,30 @@ def dump_map(cfg) -> None:
 
 
 async def list_entities(cfg) -> int:
-    from .sources.homeassistant import fetch_power_entities
-
+    source_cls = sources.get(cfg.source.type)
     try:
-        rows = await fetch_power_entities(cfg.source)
+        rows = await source_cls.discover(cfg.source)
     except Exception as exc:
-        print(f"could not reach Home Assistant at {cfg.source.url}: {exc}", file=sys.stderr)
+        print(f"could not reach the {cfg.source.type} source: {exc}", file=sys.stderr)
         return 1
 
+    if rows is None:
+        print(f"the {cfg.source.type} source has no list of readings to choose from; "
+              "configure it by hand and check it with --check-source")
+        return 1
     if not rows:
-        print("Home Assistant reports no power sensors at all. Is your P1 or energy "
-              "integration set up?")
+        print(f"the {cfg.source.type} source reports no power sensors at all. "
+              "Is your P1 or energy integration set up?")
         return 1
 
     likely = [r for r in rows if r["likely"]]
     print(f"{len(rows)} power sensors, {len(likely)} look grid-related (listed first).")
     print("Pick the one holding NET grid power: positive importing, negative exporting.\n")
-    print(f"{'entity_id':<52} {'state':>12}  unit   name")
+    print(f"{'id':<52} {'value':>12}  unit   name")
     for row in rows:
         mark = "*" if row["likely"] else " "
         unit = row["unit"] or "?"
-        print(f"{mark}{row['entity_id']:<51} {str(row['state']):>12}  {unit:<5}  {row['name']}")
+        print(f"{mark}{row['id']:<51} {str(row['value']):>12}  {unit:<5}  {row['name']}")
     print("\nSet it as source.power_entity, then run --check-source.")
     print("No single signed sensor? Set source.import_entity and source.export_entity "
           "to a positive pair instead.")
@@ -93,7 +96,7 @@ async def list_entities(cfg) -> int:
 
 async def check_source(cfg, model, source) -> int:
     """Print what the meter would report, without serving Modbus."""
-    print(f"connecting to {cfg.source.url} ...")
+    print(f"connecting to {source.describe()} ...")
     print("\nWatch the sign: importing must be POSITIVE. Switch on a kettle — the")
     print("number should jump UP by a couple of kW. If it jumps down, your sensor is")
     print("inverted; swap import_entity/export_entity, or use a template sensor.\n")
@@ -136,11 +139,11 @@ async def status_loop(cfg, model, slave, source, regfile) -> None:
             link = f"{slave.locked[0]} 8{slave.locked[1]}{cfg.serial.stopbits}"
         unmapped = sorted(regfile.unmapped)
         log.info(
-            "grid %+.0f W / %.2f A%s | modbus: %s, %d requests, %d bad frames%s | HA: %s",
+            "grid %+.0f W / %.2f A%s | modbus: %s, %d requests, %d bad frames%s | %s: %s",
             m.active_power_kw * 1000, m.current, " [FAILSAFE]" if m.stale else "",
             link, slave.requests, slave.bad_frames,
             f", unmapped {[f'0x{a:04X}' for a in unmapped[:8]]}" if unmapped else "",
-            "connected" if source.connected else "disconnected",
+            cfg.source.type, "connected" if source.connected else "disconnected",
         )
 
 
@@ -166,7 +169,7 @@ async def amain(cfg, args) -> int:
         return await list_entities(cfg)
 
     if args.check_source:
-        return await check_source(cfg, model, HomeAssistantSource(cfg.source, model))
+        return await check_source(cfg, model, sources.create(cfg.source, model))
 
     regfile = RegisterFile(
         model, cfg.meter.identity,
@@ -174,7 +177,8 @@ async def amain(cfg, args) -> int:
         on_comm_change=on_comm_change,
     )
     slave = ModbusRtuSlave(cfg.serial, regfile, passive=args.passive)
-    source = HomeAssistantSource(cfg.source, model)
+    source = sources.create(cfg.source, model)
+    log.info("reading grid power from %s", source.describe())
 
     if args.passive:
         log.warning("passive mode: listening only, the charger will get no answers")

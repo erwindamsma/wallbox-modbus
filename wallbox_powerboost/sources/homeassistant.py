@@ -4,6 +4,9 @@ Prefers the WebSocket API (push, so we see a new value the moment the P1
 reader publishes one) and falls back to REST polling if the WebSocket path
 keeps failing. Either way, a broken connection simply stops feeding the model,
 which trips the failsafe after `failsafe.max_data_age_s`.
+
+This is also the reference implementation for `sources/base.py`: a config
+dataclass, a `run()` that never returns, and a `register()` decorator.
 """
 
 from __future__ import annotations
@@ -11,8 +14,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 
 import aiohttp
+
+from .base import EnergySource, SourceConfig, register
 
 log = logging.getLogger(__name__)
 
@@ -20,21 +26,60 @@ UNIT_TO_WATTS = {"W": 1.0, "kW": 1000.0, "MW": 1_000_000.0}
 UNAVAILABLE = ("unknown", "unavailable", "none", "")
 
 
-class HomeAssistantSource:
+@dataclass
+class HomeAssistantConfig(SourceConfig):
+    url: str = "http://homeassistant.local:8123"
+    token: str = ""
+    # Preferred: one sensor holding net grid power, + importing, - exporting.
+    power_entity: str | None = None
+    # Alternative: a positive pair, subtracted. Used only without power_entity.
+    import_entity: str | None = None
+    export_entity: str | None = None
+    # Optional; falls back to meter.nominal_voltage when absent.
+    voltage_entity: str | None = None
+
+
+@register
+class HomeAssistantSource(EnergySource):
+    type = "homeassistant"
+    config_class = HomeAssistantConfig
+
     def __init__(self, cfg, model):
-        self.cfg = cfg
-        self.model = model
+        super().__init__(cfg, model)
         self.base = cfg.url.rstrip("/")
         self.mode = cfg.mode
         self._states: dict[str, float | None] = {}
         self._units: dict[str, str | None] = {}
         self._push_failures = 0
-        self.connected = False
 
         self.entities = [
             e for e in (cfg.power_entity, cfg.import_entity, cfg.export_entity, cfg.voltage_entity)
             if e
         ]
+
+    @classmethod
+    def validate(cls, cfg, complete: bool = True) -> None:
+        if not cfg.url:
+            raise ValueError("source.url is required (your Home Assistant address)")
+        if not cfg.token:
+            raise ValueError(
+                "source.token is required: a Home Assistant long-lived access token, "
+                "created under your profile -> Security"
+            )
+        # --list-entities exists to find out what these should be, so it must
+        # run before they are filled in.
+        if complete and not cfg.power_entity and not (cfg.import_entity and cfg.export_entity):
+            raise ValueError(
+                "set source.power_entity (a signed net-grid sensor), or both "
+                "source.import_entity and source.export_entity"
+            )
+
+    def describe(self) -> str:
+        return f"Home Assistant at {self.base}"
+
+    @classmethod
+    async def discover(cls, cfg) -> list[dict]:
+        return await fetch_power_entities(cfg)
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -184,6 +229,8 @@ def _t(seconds: float) -> aiohttp.ClientTimeout:
     return aiohttp.ClientTimeout(total=seconds)
 
 
+# Words that suggest a sensor measures the grid connection rather than one
+# appliance. English first, then the Dutch a P1 reader tends to produce.
 GRID_HINTS = ("grid", "net", "p1", "smart_meter", "smartmeter", "consumption",
               "production", "import", "export", "vermogen", "levering", "teruglevering")
 
@@ -209,13 +256,13 @@ async def fetch_power_entities(cfg) -> list[dict]:
         if attrs.get("device_class") != "power" and unit not in UNIT_TO_WATTS:
             continue
         entity = state.get("entity_id", "")
+        name = str(attrs.get("friendly_name", ""))
         rows.append({
-            "entity_id": entity,
-            "state": state.get("state"),
+            "id": entity,
+            "value": state.get("state"),
             "unit": unit,
-            "name": attrs.get("friendly_name", ""),
-            "likely": any(h in entity.lower() or h in str(attrs.get("friendly_name", "")).lower()
-                          for h in GRID_HINTS),
+            "name": name,
+            "likely": any(h in entity.lower() or h in name.lower() for h in GRID_HINTS),
         })
-    rows.sort(key=lambda r: (not r["likely"], r["entity_id"]))
+    rows.sort(key=lambda r: (not r["likely"], r["id"]))
     return rows

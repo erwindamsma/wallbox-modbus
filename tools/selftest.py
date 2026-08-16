@@ -16,6 +16,8 @@ import struct
 import sys
 import time
 
+import yaml
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from wallbox_powerboost import n1ct  # noqa: E402
@@ -193,6 +195,56 @@ def main() -> int:
             failsafe__current_a=35.0)
     rejects("a failsafe below the installation limit is rejected",
             failsafe__current_a=20.0)
+    rejects("a polyphase installation is rejected rather than half-protected",
+            meter__phases=3)
+    rejects("a nonsense current_sign is rejected", meter__current_sign="sideways")
+
+    print("\nconfig file handling")
+    import tempfile  # noqa: E402
+
+    from wallbox_powerboost import config as config_mod  # noqa: E402
+
+    base = {
+        "limits": {"installation_current_a": 25.0},
+        "source": {"type": "homeassistant", "token": "x", "power_entity": "sensor.x"},
+    }
+
+    def load_yaml(doc):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+            yaml.safe_dump(doc, fh)
+            name = fh.name
+        try:
+            return config_mod.load(name)
+        finally:
+            os.unlink(name)
+
+    def load_fails(name, doc, expect: str):
+        try:
+            load_yaml(doc)
+        except ValueError as exc:
+            check(name, expect in str(exc), f"raised: {str(exc).splitlines()[0]}")
+            return
+        check(name, False, "was accepted")
+
+    loaded = load_yaml(base)
+    check("a minimal config loads", loaded.limits.installation_current_a == 25.0)
+    check("the failsafe is derived above the installation limit",
+          loaded.failsafe.current_a > 25.0, f"{loaded.failsafe.current_a} A")
+    check("the source config is the type's own dataclass",
+          type(loaded.source).__name__ == "HomeAssistantConfig")
+
+    load_fails("a missing fuse rating is refused, not defaulted",
+               {k: v for k, v in base.items() if k != "limits"},
+               "limits.installation_current_a is required")
+    load_fails("an unknown source type names the ones that exist",
+               {**base, "source": {**base["source"], "type": "carrier_pigeon"}},
+               "unsupported source.type")
+    load_fails("an option belonging to no source is a typo, not an extension",
+               {**base, "source": {**base["source"], "urls": "http://x"}},
+               "unknown option")
+    load_fails("a misspelled top-level section is caught",
+               {**base, "limit": {}},
+               "unknown top-level option")
 
     print("\nenergy integration")
     acc = MeterModel(nominal_voltage=230.0, max_data_age_s=60.0)
