@@ -5,7 +5,7 @@ sees an INEPRO N1-CT energy meter on its RS485 port. This program pretends to be
 that meter, fed with live grid power from Home Assistant.
 
 I didn't want to buy the accessory, and the meter turned out to be a stock
-Modbus device, so this was mostly a weekend of staring at a serial port.
+Modbus device.
 
 ## Status
 
@@ -19,7 +19,7 @@ Everything here comes from one charger, mine.
   charger's terminal block.
 
 Other Wallbox models (Copper SB, Commander 2, Quasar) use the same EMS docs and
-will probably work, but nobody has tried. If you do,
+will probably work, but I haven't tried that. If you do, please
 [tell me what happened](CONTRIBUTING.md).
 
 ## How it works
@@ -36,10 +36,9 @@ and the charger polls it as a plain Modbus RTU master:
 | Function | 03 to read, 06 to write |
 | Encoding | big-endian float32 over two registers |
 
-The N1-CT manual says 9600 8E1. That's wrong for this bus, Wallbox reconfigures
-the meter it ships. I lost a day to that, because at 9600 the frames still
-decode far enough to look like a parity problem. Set `baud: auto` and
-`parity: auto` if you want the emulator to find it for you.
+The N1-CT manual says 9600 8E1, but that's wrong for this bus. I think
+Wallbox reconfigures the meter it ships. Set `baud: auto` and `parity: auto`
+if you want the emulator to find it for you.
 
 So: read the house load, put it on the registers the charger asks for, and the
 charger does its own balancing. That's the right place for it, since the charger
@@ -113,9 +112,9 @@ Also set the **RS485 switch to `T`** (you're the only slave, so terminate), and
 the **rotary switch** to your maximum charging current
 (`1=6A 2=10A 3=13A 4=16A 5=20A 6=25A 7=32A`).
 
-Then install the udev rules. They drop the FTDI latency timer from 16 ms to 1 ms,
-which otherwise lands right on the Modbus turnaround, and give you a stable
-device name so a second adapter can't steal `/dev/ttyUSB0`:
+Then install the udev rules. They drop the FTDI latency timer from 16 ms to
+1 ms, which otherwise lands right on the Modbus turnaround, and give you a
+stable device name so a second adapter can't steal `/dev/ttyUSB0`:
 
 ```bash
 sudo cp udev/99-wallbox-rs485.rules /etc/udev/rules.d/
@@ -177,19 +176,21 @@ Use `parity none` here. A pty has no UART and can't emulate parity.
 
 **4. Test the wiring** with a second adapter over real RS485, A–A, B–B, GND–GND.
 
-**5. Listen first.** Wire it to the charger, enable Power Boost in the app, run
-with `--passive --log-level DEBUG`. It decodes but never transmits, so you can
-see what the charger asks for. Leave baud and parity on `auto` and it'll log
-what it locked onto.
+**5. Listen first.** Wire it to the charger, run with
+`--passive --log-level DEBUG`, and reboot the charger. It decodes but never
+transmits, so you can see what the charger asks for. Leave baud and parity on
+`auto` and it'll log what it locked onto.
 
-*Seeing nothing at all? Swap D+ and D−. It's always that.*
+*Seeing nothing at all? try swapping D+ and D−.*
 
-**6. Answer it.** Drop `--passive`, reboot the charger from the app. Success is
+**6. Answer it.** Drop `--passive`, reboot the charger. Success is
 a burst of `0x4000` reads followed by steady polling of `0x500A` and `0x5012`.
 
-**7. Prove it throttles.** Start a charge, confirm it sits at 16 A, then switch
-on an oven. The charge current should drop within seconds. That's the whole
-point, and until you've seen it you don't have load management.
+**7. Prove it throttles.** The charger should allow you to enable Power Boost
+/ Dynamic load balancing in the app. Enable it and start a charge, confirm it's
+charging at whatever max you chose, then switch on an oven. The charge current
+should drop within seconds. That's the whole point, and until you've seen it you
+don't have load management.
 
 ## When the charger won't accept the meter
 
@@ -348,4 +349,5 @@ Any of these may suit you better, and two of them are supported products:
 
 ## Licence
 
-[MIT](LICENSE). Not affiliated with Wallbox Chargers S.L. or inepro Metering B.V.
+[MIT](LICENSE). Not affiliated with Wallbox Chargers S.L. or inepro Metering
+B.V.
